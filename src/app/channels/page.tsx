@@ -8,46 +8,76 @@ interface Channel {
   youtube_id: string
   language: string
   category?: string
+  subscriber_count?: number
+}
+
+interface RecommendedChannel {
+  name: string
+  youtube_id: string
+  language: string
+  description: string
+  is_popular: boolean
+  subscriber_count: number
 }
 
 export default function ChannelsPage() {
   const [channels, setChannels] = useState<Channel[]>([])
+  const [recommended, setRecommended] = useState<RecommendedChannel[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [subscribingId, setSubscribingId] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
+  const fetchAll = () => {
     fetch('/api/channels')
       .then((r) => r.json())
       .then((data) => Array.isArray(data) && setChannels(data))
-  }, [])
+    fetch('/api/channels/recommended')
+      .then((r) => r.json())
+      .then((data) => Array.isArray(data) && setRecommended(data))
+  }
 
-  const subscribe = async () => {
-    const url = inputRef.current?.value.trim() ?? ''
+  useEffect(() => { fetchAll() }, [])
+
+  const subscribe = async (urlOrId?: string) => {
+    const url = urlOrId ?? inputRef.current?.value.trim() ?? ''
     if (!url) return
-    setLoading(true)
+    if (urlOrId) setSubscribingId(urlOrId)
+    else setLoading(true)
     setError('')
     try {
+      // If it looks like a channel ID (UC...), build the URL
+      const channelUrl = url.startsWith('UC')
+        ? `https://www.youtube.com/channel/${url}`
+        : url
       const res = await fetch('/api/channels', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url: channelUrl }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       setChannels((prev) => [data, ...prev])
       if (inputRef.current) inputRef.current.value = ''
+      // Refresh recommendations after subscribing
+      fetch('/api/channels/recommended')
+        .then((r) => r.json())
+        .then((data) => Array.isArray(data) && setRecommended(data))
     } catch (err) {
       setError((err as Error).message)
     } finally {
       setLoading(false)
+      setSubscribingId(null)
     }
   }
 
   const remove = async (id: string) => {
     await fetch(`/api/channels?id=${id}`, { method: 'DELETE' })
     setChannels((prev) => prev.filter((c) => c.id !== id))
+    fetchAll()
   }
+
+  const subscribedIds = new Set(channels.map((c) => c.youtube_id))
 
   return (
     <div className="flex flex-col gap-6 p-5">
@@ -67,7 +97,7 @@ export default function ChannelsPage() {
             className="flex-1 rounded-xl border border-gray-200 px-4 py-3 text-sm focus:border-blue-400 focus:outline-none"
           />
           <button
-            onClick={subscribe}
+            onClick={() => subscribe()}
             disabled={loading}
             className="rounded-xl bg-blue-500 px-4 py-3 text-sm font-medium text-white disabled:opacity-40"
           >
@@ -77,32 +107,83 @@ export default function ChannelsPage() {
         {error && <p className="text-sm text-red-500">{error}</p>}
       </div>
 
-      {/* Channel list */}
-      <div className="flex flex-col gap-3">
-        {channels.length === 0 ? (
-          <p className="py-10 text-center text-sm text-gray-400">No channels subscribed yet</p>
-        ) : (
-          channels.map((ch) => (
-            <div key={ch.id} className="flex items-center gap-3 rounded-2xl bg-white p-4 shadow-sm">
-              <img
-                src={`https://img.youtube.com/vi//mqdefault.jpg`}
-                alt=""
-                className="h-10 w-10 rounded-full bg-gray-100 object-cover"
-              />
-              <div className="flex-1">
-                <p className="font-medium text-gray-900">{ch.name}</p>
-                <p className="text-xs text-gray-400">{ch.language.toUpperCase()}</p>
+      {/* Subscribed channel list */}
+      {channels.length > 0 && (
+        <section>
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
+            Subscribed
+          </h2>
+          <div className="flex flex-col gap-3">
+            {channels.map((ch) => (
+              <div key={ch.id} className="flex items-center gap-3 rounded-2xl bg-white p-4 shadow-sm">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-500">
+                  {ch.name.charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-gray-900 truncate">{ch.name}</p>
+                  <p className="text-xs text-gray-400">{ch.language.toUpperCase()}</p>
+                </div>
+                <button
+                  onClick={() => remove(ch.id)}
+                  className="text-sm text-gray-400 hover:text-red-500 shrink-0"
+                >
+                  Remove
+                </button>
               </div>
-              <button
-                onClick={() => remove(ch.id)}
-                className="text-sm text-gray-400 hover:text-red-500"
-              >
-                Remove
-              </button>
-            </div>
-          ))
-        )}
-      </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Recommendations */}
+      {recommended.length > 0 && (
+        <section>
+          <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">
+            Recommended
+          </h2>
+          <p className="mb-3 text-xs text-gray-400">Popular channels on TubeLingo</p>
+          <div className="flex flex-col gap-3">
+            {recommended.map((ch) => {
+              const isAlreadySubscribed = subscribedIds.has(ch.youtube_id)
+              const isSubscribing = subscribingId === ch.youtube_id
+              return (
+                <div key={ch.youtube_id} className="flex items-center gap-3 rounded-2xl bg-white p-4 shadow-sm">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-100 text-sm font-bold text-gray-500">
+                    {ch.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <p className="font-medium text-gray-900 truncate">{ch.name}</p>
+                      {ch.is_popular && (
+                        <span className="shrink-0 rounded-full bg-orange-100 px-1.5 py-0.5 text-xs font-medium text-orange-600">
+                          Popular
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-400 truncate">{ch.description}</p>
+                    <p className="text-xs text-gray-300 mt-0.5">{ch.language.toUpperCase()}</p>
+                  </div>
+                  <button
+                    onClick={() => !isAlreadySubscribed && subscribe(ch.youtube_id)}
+                    disabled={isAlreadySubscribed || isSubscribing}
+                    className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                      isAlreadySubscribed
+                        ? 'bg-gray-100 text-gray-400'
+                        : 'bg-blue-500 text-white hover:bg-blue-600'
+                    }`}
+                  >
+                    {isSubscribing ? '...' : isAlreadySubscribed ? 'Added' : 'Add'}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
+      {channels.length === 0 && recommended.length === 0 && (
+        <p className="py-10 text-center text-sm text-gray-400">No channels subscribed yet</p>
+      )}
     </div>
   )
 }

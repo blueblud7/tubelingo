@@ -73,3 +73,29 @@ create index if not exists idx_lessons_date on lessons(assigned_date desc);
 alter table lessons enable row level security;
 create policy "public read lessons" on lessons for select using (true);
 create policy "public write lessons" on lessons for all using (true);
+
+-- Subscriber count tracking (run this if channels table already exists)
+alter table channels add column if not exists subscriber_count int default 0;
+
+-- User Vocabulary (flashcard book)
+create table if not exists user_vocabulary (
+  id uuid primary key default gen_random_uuid(),
+  word text not null,
+  definition text not null,
+  part_of_speech text,
+  pronunciation text,
+  source_sentence text,
+  source_video_id uuid references videos(id) on delete set null,
+  -- SM-2 spaced repetition fields
+  easiness_factor float default 2.5,
+  interval_days int default 1,
+  repetitions int default 0,
+  next_review date default current_date,
+  created_at timestamptz default now(),
+  constraint unique_word unique (word)
+);
+
+create index if not exists idx_vocab_next_review on user_vocabulary(next_review);
+
+alter table user_vocabulary enable row level security;
+create policy "public access vocabulary" on user_vocabulary for all using (true);

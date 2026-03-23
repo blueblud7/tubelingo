@@ -25,7 +25,8 @@ export async function POST(req: NextRequest) {
 
     const db = createServiceClient()
 
-    // Upsert channel
+    // Upsert channel and increment subscriber_count
+    const { data: existing } = await db.from('channels').select('subscriber_count').eq('youtube_id', channelId).single()
     const { data, error } = await db
       .from('channels')
       .upsert(
@@ -33,7 +34,8 @@ export async function POST(req: NextRequest) {
           youtube_id: channelId,
           rss_url: rssUrl,
           name: feed.title || 'Unknown Channel',
-          language: 'en', // TODO: auto-detect from feed
+          language: 'en',
+          subscriber_count: (existing?.subscriber_count ?? 0) + 1,
         },
         { onConflict: 'youtube_id' }
       )

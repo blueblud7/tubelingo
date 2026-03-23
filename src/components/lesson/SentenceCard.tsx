@@ -14,6 +14,8 @@ interface Props {
 export default function SentenceCard({ sentence, index, total, onGotIt, onReview }: Props) {
   const [showTranslation, setShowTranslation] = useState(false)
   const [expandedWord, setExpandedWord] = useState<string | null>(null)
+  const [savedWords, setSavedWords] = useState<Set<string>>(new Set())
+  const [savingWord, setSavingWord] = useState<string | null>(null)
 
   const difficultyColor = {
     1: 'bg-green-100 text-green-700',
@@ -22,6 +24,28 @@ export default function SentenceCard({ sentence, index, total, onGotIt, onReview
     4: 'bg-orange-100 text-orange-700',
     5: 'bg-red-100 text-red-700',
   }[sentence.difficulty]
+
+  const saveWord = async (word: string) => {
+    const v = sentence.vocabulary.find((v) => v.word === word)
+    if (!v) return
+    setSavingWord(word)
+    try {
+      await fetch('/api/vocabulary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          word: v.word,
+          definition: v.definition,
+          part_of_speech: v.part_of_speech,
+          pronunciation: v.pronunciation,
+          source_sentence: sentence.text,
+        }),
+      })
+      setSavedWords((prev) => new Set(prev).add(word))
+    } finally {
+      setSavingWord(null)
+    }
+  }
 
   return (
     <div className="flex flex-col gap-4 rounded-2xl bg-white p-6 shadow-md">
@@ -68,14 +92,28 @@ export default function SentenceCard({ sentence, index, total, onGotIt, onReview
       {expandedWord && (() => {
         const v = sentence.vocabulary.find((v) => v.word === expandedWord)
         if (!v) return null
+        const isSaved = savedWords.has(v.word)
+        const isSaving = savingWord === v.word
         return (
           <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm">
-            <p className="font-semibold text-blue-800">
-              {v.word}
-              {v.part_of_speech && (
-                <span className="ml-2 font-normal text-blue-500">({v.part_of_speech})</span>
-              )}
-            </p>
+            <div className="flex items-start justify-between">
+              <p className="font-semibold text-blue-800">
+                {v.word}
+                {v.part_of_speech && (
+                  <span className="ml-2 font-normal text-blue-500">({v.part_of_speech})</span>
+                )}
+              </p>
+              <button
+                onClick={() => !isSaved && saveWord(v.word)}
+                disabled={isSaved || isSaving}
+                className={`ml-3 shrink-0 text-lg transition-transform active:scale-90 ${
+                  isSaved ? 'opacity-100' : 'opacity-50 hover:opacity-100'
+                }`}
+                title={isSaved ? 'Saved to vocabulary' : 'Save to vocabulary'}
+              >
+                {isSaved ? '★' : isSaving ? '...' : '☆'}
+              </button>
+            </div>
             {v.pronunciation && <p className="text-gray-500">{v.pronunciation}</p>}
             <p className="mt-1 text-gray-700">{v.definition}</p>
           </div>
