@@ -1,88 +1,120 @@
-import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { fetchChannelRSS } from '@/lib/rss'
 import { fetchTranscript } from '@/lib/transcript'
 import { analyzeTranscript } from '@/lib/openai'
+import { createLesson } from '@/lib/lesson'
 
-// POST /api/rss — poll all subscribed channels for new videos
-// Called by cron job (e.g., Vercel cron or external scheduler)
+export const maxDuration = 60
+
+// POST /api/rss — poll channels and stream progress via SSE
 export async function POST() {
-  const db = createServiceClient()
+  const encoder = new TextEncoder()
 
-  const { data: channels, error } = await db.from('channels').select('*')
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-  const results = []
-
-  for (const channel of channels ?? []) {
-    try {
-      const feed = await fetchChannelRSS(channel.youtube_id)
-      const latestItems = feed.items?.slice(0, 5) ?? []
-
-      for (const item of latestItems) {
-        const videoId = item.id?.split(':').pop() || item.link?.split('v=')[1]?.split('&')[0]
-        if (!videoId) continue
-
-        // Skip already processed videos
-        const { data: existing } = await db
-          .from('videos')
-          .select('id')
-          .eq('youtube_video_id', videoId)
-          .single()
-        if (existing) continue
-
-        // Save new video
-        const { data: video, error: videoErr } = await db
-          .from('videos')
-          .insert({
-            channel_id: channel.id,
-            youtube_video_id: videoId,
-            title: item.title,
-            published_at: item.pubDate,
-            processed: false,
-          })
-          .select()
-          .single()
-
-        if (videoErr || !video) continue
-
-        // Extract transcript & analyze
-        try {
-          const transcript = await fetchTranscript(videoId, channel.language)
-
-          await db.from('videos').update({ transcript }).eq('id', video.id)
-
-          const sentences = await analyzeTranscript(
-            transcript,
-            channel.language,
-            'ko', // TODO: per-user native language
-            'mixed'
-          )
-
-          // Save sentences
-          const sentenceRows = sentences.map((s) => ({
-            video_id: video.id,
-            text: s.text,
-            translation: s.translation,
-            timestamp: s.timestamp,
-            difficulty: s.difficulty,
-            vocabulary: s.vocabulary,
-            idioms: s.idioms,
-            grammar_points: s.grammar_points,
-          }))
-
-          await db.from('sentences').insert(sentenceRows)
-          await db.from('videos').update({ processed: true }).eq('id', video.id)
-
-          results.push({ videoId, status: 'processed' })
-        } catch (err) {
-          results.push({ videoId, status: 'transcript_failed', error: (err as Error).message })
-        }
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (message: string, step: string) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ message, step })}\n\n`))
       }
-    } catch (err) {
-      results.push({ channelId: channel.id, status: 'rss_failed', error: (err as Error).message })
-    }
-  }
 
-  return NextResponse.json({ processed: results.length, results })
+      try {
+        const db = createServiceClient()
+        const { data: channels, error } = await db.from('channels').select('*')
+        if (error) throw error
+
+        if (!channels || channels.length === 0) {
+          send('No channels subscribed yet.', 'done')
+          controller.close()
+          return
+        }
+
+        send(`Checking ${channels.length} channel${channels.length > 1 ? 's' : ''} for updates...`, 'checking')
+
+        for (const channel of channels) {
+          send(`Fetching feed: ${channel.name}`, 'checking')
+          const feed = await fetchChannelRSS(channel.youtube_id)
+          const latestItems = feed.items?.slice(0, 3) ?? []
+
+          for (const item of latestItems) {
+            const videoId = item.id?.split(':').pop() || item.link?.split('v=')[1]?.split('&')[0]
+            if (!videoId) continue
+
+            // Cache hit check
+            const { data: existing } = await db
+              .from('videos')
+              .select('id, processed')
+              .eq('youtube_video_id', videoId)
+              .single()
+
+            if (existing) {
+              if (existing.processed) await createLesson(existing.id)
+              continue
+            }
+
+            // Save video
+            const { data: video } = await db
+              .from('videos')
+              .insert({
+                channel_id: channel.id,
+                youtube_video_id: videoId,
+                title: item.title,
+                published_at: item.pubDate,
+                processed: false,
+              })
+              .select()
+              .single()
+
+            if (!video) continue
+
+            // Transcript
+            try {
+              send(`Downloading transcript: "${item.title?.slice(0, 50)}"`, 'transcript')
+              const transcript = await fetchTranscript(videoId, channel.language)
+              await db.from('videos').update({ transcript }).eq('id', video.id)
+
+              // AI analysis
+              send(`Analyzing content with AI...`, 'analyzing')
+              const sentences = await analyzeTranscript(transcript, channel.language, 'en', 'mixed')
+              await db.from('sentences').insert(
+                sentences.map((s) => ({
+                  video_id: video.id,
+                  text: s.text,
+                  translation: s.translation,
+                  timestamp: s.timestamp,
+                  difficulty: s.difficulty,
+                  vocabulary: s.vocabulary,
+                  idioms: s.idioms,
+                  grammar_points: s.grammar_points,
+                }))
+              )
+              await db.from('videos').update({ processed: true }).eq('id', video.id)
+
+              send(`Creating lesson...`, 'creating')
+              await createLesson(video.id)
+
+              send(`Lesson ready: "${item.title?.slice(0, 50)}"`, 'ready')
+            } catch (err) {
+              send(`Skipped (no transcript): "${item.title?.slice(0, 40)}"`, 'skipped')
+              console.error('Transcript error:', err)
+            }
+          }
+        }
+
+        send('All done!', 'done')
+      } catch (err) {
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ message: `Error: ${(err as Error).message}`, step: 'error' })}\n\n`)
+        )
+      } finally {
+        controller.close()
+      }
+    },
+  })
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  })
 }

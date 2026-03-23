@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { fetchTranscript } from '@/lib/transcript'
 import { analyzeTranscript } from '@/lib/openai'
+import { createLesson } from '@/lib/lesson'
 
 // POST /api/analyze — manually trigger analysis for a video
 export async function POST(req: NextRequest) {
@@ -48,6 +49,7 @@ export async function POST(req: NextRequest) {
     )
 
     await db.from('videos').update({ processed: true }).eq('id', video_id)
+    await createLesson(video_id)
 
     return NextResponse.json({ success: true, sentences })
   } catch (err) {

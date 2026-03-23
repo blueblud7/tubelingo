@@ -56,3 +56,20 @@ create policy "public read videos" on videos for select using (true);
 create policy "public read sentences" on sentences for select using (true);
 
 -- Service role can do everything (API routes use service role key)
+
+-- Lessons (date-based history tracking)
+create table if not exists lessons (
+  id uuid primary key default gen_random_uuid(),
+  video_id uuid references videos(id) on delete cascade not null unique,
+  assigned_date date not null default current_date,
+  status text not null default 'pending' check (status in ('pending', 'in_progress', 'completed')),
+  score int,
+  completed_at timestamptz,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_lessons_date on lessons(assigned_date desc);
+
+alter table lessons enable row level security;
+create policy "public read lessons" on lessons for select using (true);
+create policy "public write lessons" on lessons for all using (true);

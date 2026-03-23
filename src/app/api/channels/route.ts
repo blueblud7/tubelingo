@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase'
 import { extractChannelId, buildRssUrl, fetchChannelRSS } from '@/lib/rss'
 import { fetchTranscript } from '@/lib/transcript'
 import { analyzeTranscript } from '@/lib/openai'
+import { createLesson } from '@/lib/lesson'
 
 // GET /api/channels — list all channels
 export async function GET() {
@@ -63,13 +64,16 @@ async function processLatestVideo(
   const videoId = item.id?.split(':').pop() || item.link?.split('v=')[1]?.split('&')[0]
   if (!videoId) return
 
-  // Skip if already processed
+  // If already processed, just create a lesson record (cache hit — skip expensive work)
   const { data: existing } = await db
     .from('videos')
-    .select('id')
+    .select('id, processed')
     .eq('youtube_video_id', videoId)
     .single()
-  if (existing) return
+  if (existing) {
+    if (existing.processed) await createLesson(existing.id)
+    return
+  }
 
   const { data: video } = await db
     .from('videos')
@@ -102,6 +106,7 @@ async function processLatestVideo(
     }))
   )
   await db.from('videos').update({ processed: true }).eq('id', video.id)
+  await createLesson(video.id)
 }
 
 // DELETE /api/channels?id=...
