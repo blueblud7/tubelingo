@@ -1,65 +1,147 @@
-import Image from "next/image";
+'use client'
 
-export default function Home() {
+import { useEffect, useState } from 'react'
+import Link from 'next/link'
+
+interface VideoWithSentences {
+  id: string
+  youtube_video_id: string
+  title: string
+  published_at: string
+  channel: { id: string; name: string; youtube_id: string; language: string } | null
+  sentences: Array<{ id: string; text: string; difficulty: number }>
+}
+
+export default function HomePage() {
+  const [lessons, setLessons] = useState<VideoWithSentences[]>([])
+  const [loading, setLoading] = useState(true)
+  const [processing, setProcessing] = useState(false)
+
+  const fetchLessons = () =>
+    fetch('/api/lessons')
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data)) setLessons(data); return data })
+      .finally(() => setLoading(false))
+
+  useEffect(() => {
+    fetchLessons()
+  }, [])
+
+  // Poll every 5s while processing
+  useEffect(() => {
+    if (!processing) return
+    const interval = setInterval(() => {
+      fetchLessons().then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setProcessing(false)
+        }
+      })
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [processing])
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="flex flex-col gap-6 p-5">
+      {/* Header */}
+      <div className="pt-4">
+        <h1 className="text-2xl font-bold text-gray-900">TubeLingo</h1>
+        <p className="text-sm text-gray-500">Today's Lessons</p>
+      </div>
+
+      {/* Lessons */}
+      {loading ? (
+        <div className="flex items-center justify-center py-20 text-gray-400">Loading...</div>
+      ) : processing ? (
+        <ProcessingState />
+      ) : lessons.length === 0 ? (
+        <EmptyState onStartProcessing={() => setProcessing(true)} />
+      ) : (
+        <div className="flex flex-col gap-3">
+          {lessons.map((video) => (
+            <LessonCard key={video.id} video={video} />
+          ))}
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+      )}
     </div>
-  );
+  )
+}
+
+function LessonCard({ video }: { video: VideoWithSentences }) {
+  const sentenceCount = video.sentences?.length ?? 0
+  const thumbUrl = `https://img.youtube.com/vi/${video.youtube_video_id}/mqdefault.jpg`
+
+  return (
+    <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
+      {/* Thumbnail */}
+      <img src={thumbUrl} alt={video.title} className="h-40 w-full object-cover" />
+
+      <div className="p-4">
+        <p className="text-xs font-medium text-blue-500">{video.channel?.name}</p>
+        <h2 className="mt-1 line-clamp-2 text-sm font-semibold text-gray-900">{video.title}</h2>
+
+        <div className="mt-3 flex items-center justify-between">
+          <span className="text-xs text-gray-400">{sentenceCount} sentences</span>
+          <div className="flex gap-2">
+            <Link
+              href={`/lesson/${video.id}`}
+              className="rounded-lg bg-blue-500 px-3 py-1.5 text-xs font-medium text-white"
+            >
+              Study
+            </Link>
+            {sentenceCount > 0 && (
+              <Link
+                href={`/quiz/${video.id}`}
+                className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600"
+              >
+                Quiz
+              </Link>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function EmptyState({ onStartProcessing }: { onStartProcessing: () => void }) {
+  const handleFetch = async () => {
+    onStartProcessing()
+    await fetch('/api/rss', { method: 'POST' })
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-4 py-20 text-center">
+      <span className="text-5xl">📺</span>
+      <h2 className="text-lg font-semibold text-gray-700">No lessons yet</h2>
+      <p className="text-sm text-gray-400">
+        Subscribe to a channel and lessons will be<br />generated automatically from new videos.
+      </p>
+      <div className="flex gap-3">
+        <Link
+          href="/channels"
+          className="rounded-xl border border-gray-200 px-5 py-2.5 text-sm font-medium text-gray-600"
+        >
+          Manage channels
+        </Link>
+        <button
+          onClick={handleFetch}
+          className="rounded-xl bg-blue-500 px-5 py-2.5 text-sm font-medium text-white"
+        >
+          Fetch lessons now
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function ProcessingState() {
+  return (
+    <div className="flex flex-col items-center gap-4 py-20 text-center">
+      <div className="h-10 w-10 animate-spin rounded-full border-4 border-blue-200 border-t-blue-500" />
+      <h2 className="text-lg font-semibold text-gray-700">Generating lessons...</h2>
+      <p className="text-sm text-gray-400">
+        Fetching transcripts and analyzing content.<br />This may take up to a minute.
+      </p>
+    </div>
+  )
 }
