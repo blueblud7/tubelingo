@@ -24,8 +24,18 @@ interface LessonEntry {
   } | null
 }
 
+interface Stats {
+  streak: number
+  longestStreak: number
+  totalCompleted: number
+  todayTotal: number
+  todayDone: number
+  calendar: { date: string; count: number; avgScore: number }[]
+}
+
 export default function HomePage() {
   const [lessons, setLessons] = useState<LessonEntry[]>([])
+  const [stats, setStats] = useState<Stats | null>(null)
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
   const [progressMessages, setProgressMessages] = useState<{ message: string; step: string }[]>([])
@@ -39,10 +49,18 @@ export default function HomePage() {
       })
       .finally(() => setLoading(false))
 
-  useEffect(() => { fetchLessons() }, [])
+  const fetchStats = () =>
+    fetch('/api/stats')
+      .then((r) => r.json())
+      .then((data) => !data.error && setStats(data))
 
   useEffect(() => {
-    const handler = () => { setProcessing(false); fetchLessons() }
+    fetchLessons()
+    fetchStats()
+  }, [])
+
+  useEffect(() => {
+    const handler = () => { setProcessing(false); fetchLessons(); fetchStats() }
     window.addEventListener('lessons:refresh', handler)
     return () => window.removeEventListener('lessons:refresh', handler)
   }, [])
@@ -83,6 +101,9 @@ export default function HomePage() {
         <p className="text-sm text-gray-500">Your lessons</p>
       </div>
 
+      {/* Stats */}
+      {stats && <StatsBar stats={stats} />}
+
       {loading ? (
         <div className="flex items-center justify-center py-20 text-gray-400">Loading...</div>
       ) : processing ? (
@@ -108,6 +129,120 @@ export default function HomePage() {
     </div>
   )
 }
+
+// ── Stats Bar ──────────────────────────────────────────────────────────────────
+
+function StatsBar({ stats }: { stats: Stats }) {
+  const { streak, totalCompleted, todayDone, todayTotal, calendar, longestStreak } = stats
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* Top row: streak + total */}
+      <div className="flex gap-3">
+        <div className="flex flex-1 flex-col items-center gap-0.5 rounded-2xl bg-white py-4 shadow-sm">
+          <span className="text-2xl font-bold text-gray-900">
+            {streak > 0 ? '🔥' : '💤'} {streak}
+          </span>
+          <span className="text-xs text-gray-400">day streak</span>
+          {longestStreak > streak && (
+            <span className="text-xs text-gray-300">best {longestStreak}</span>
+          )}
+        </div>
+        <div className="flex flex-1 flex-col items-center gap-0.5 rounded-2xl bg-white py-4 shadow-sm">
+          <span className="text-2xl font-bold text-gray-900">✅ {totalCompleted}</span>
+          <span className="text-xs text-gray-400">lessons done</span>
+        </div>
+      </div>
+
+      {/* Today progress */}
+      {todayTotal > 0 && (
+        <div className="rounded-2xl bg-white p-4 shadow-sm">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-medium text-gray-700">Today's goal</span>
+            <span className="text-sm font-semibold text-blue-500">
+              {todayDone} / {todayTotal}
+            </span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-gray-100">
+            <div
+              className="h-full rounded-full bg-blue-500 transition-all"
+              style={{ width: `${todayTotal > 0 ? (todayDone / todayTotal) * 100 : 0}%` }}
+            />
+          </div>
+          {todayDone === todayTotal && todayTotal > 0 && (
+            <p className="mt-2 text-center text-xs font-medium text-green-500">
+              All done for today! 🎉
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Calendar heatmap */}
+      <CalendarHeatmap calendar={calendar} />
+    </div>
+  )
+}
+
+// ── Calendar Heatmap ───────────────────────────────────────────────────────────
+
+function CalendarHeatmap({ calendar }: { calendar: { date: string; count: number; avgScore: number }[] }) {
+  const today = new Date().toISOString().split('T')[0]
+
+  // Build 10 weeks × 7 days grid (70 days)
+  const weeks: typeof calendar[number][][] = []
+  for (let i = 0; i < calendar.length; i += 7) {
+    weeks.push(calendar.slice(i, i + 7))
+  }
+
+  const cellColor = (entry: { count: number; avgScore: number }) => {
+    if (entry.count === 0) return 'bg-gray-100'
+    if (entry.avgScore >= 80) return 'bg-blue-500'
+    if (entry.avgScore >= 50) return 'bg-blue-300'
+    return 'bg-blue-200'
+  }
+
+  const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+
+  return (
+    <div className="rounded-2xl bg-white p-4 shadow-sm">
+      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
+        Activity — last 10 weeks
+      </p>
+      {/* Day labels */}
+      <div className="mb-1 flex gap-1 pl-0">
+        {dayLabels.map((d, i) => (
+          <div key={i} className="w-6 text-center text-xs text-gray-300">{d}</div>
+        ))}
+      </div>
+      {/* Grid: each row = one week */}
+      <div className="flex flex-col gap-1">
+        {weeks.map((week, wi) => (
+          <div key={wi} className="flex gap-1">
+            {week.map((day) => (
+              <div
+                key={day.date}
+                title={`${day.date}${day.count > 0 ? ` · ${day.count} lesson${day.count > 1 ? 's' : ''}${day.avgScore > 0 ? ` · avg ${day.avgScore}%` : ''}` : ''}`}
+                className={`h-6 w-6 rounded-sm transition-all ${cellColor(day)} ${
+                  day.date === today ? 'ring-2 ring-blue-400 ring-offset-1' : ''
+                }`}
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex items-center gap-2 text-xs text-gray-400">
+        <span>Less</span>
+        <div className="h-3 w-3 rounded-sm bg-gray-100" />
+        <div className="h-3 w-3 rounded-sm bg-blue-200" />
+        <div className="h-3 w-3 rounded-sm bg-blue-300" />
+        <div className="h-3 w-3 rounded-sm bg-blue-500" />
+        <span>More</span>
+      </div>
+    </div>
+  )
+}
+
+// ── Lesson Card ────────────────────────────────────────────────────────────────
 
 function LessonCard({ lesson }: { lesson: LessonEntry }) {
   const { video, status, score } = lesson
@@ -155,6 +290,8 @@ function LessonCard({ lesson }: { lesson: LessonEntry }) {
   )
 }
 
+// ── Empty State ────────────────────────────────────────────────────────────────
+
 function EmptyState({ onStartProcessing, onMessages }: {
   onStartProcessing: () => void
   onMessages: (msgs: { message: string; step: string }[]) => void
@@ -179,7 +316,6 @@ function EmptyState({ onStartProcessing, onMessages }: {
         } catch {}
       }
     }
-    // Refresh lessons after stream completes
     window.dispatchEvent(new Event('lessons:refresh'))
   }
   return (
@@ -200,6 +336,8 @@ function EmptyState({ onStartProcessing, onMessages }: {
     </div>
   )
 }
+
+// ── Processing State ───────────────────────────────────────────────────────────
 
 const stepIcon: Record<string, string> = {
   checking: '📡',
