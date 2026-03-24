@@ -185,19 +185,32 @@ function StatsBar({ stats }: { stats: Stats }) {
 
 // ── Calendar Heatmap ───────────────────────────────────────────────────────────
 
-function CalendarHeatmap({ calendar }: { calendar: { date: string; count: number; avgScore: number }[] }) {
+type CalendarDay = { date: string; count: number; avgScore: number }
+
+function CalendarHeatmap({ calendar }: { calendar: CalendarDay[] }) {
   const today = new Date().toISOString().split('T')[0]
 
-  // Build 10 weeks × 7 days grid (70 days)
-  const weeks: typeof calendar[number][][] = []
-  for (let i = 0; i < calendar.length; i += 7) {
-    weeks.push(calendar.slice(i, i + 7))
+  // GitHub style: columns = weeks (left=old, right=new), rows = day of week (Sun→Sat)
+  // Pad the start so column 0, row 0 = Sunday of the oldest week
+  const firstDate = new Date(calendar[0].date)
+  const firstDow = firstDate.getDay() // 0=Sun … 6=Sat
+
+  const padded: (CalendarDay | null)[] = [
+    ...Array<null>(firstDow).fill(null),
+    ...calendar,
+  ]
+  // Split into week columns of 7
+  const weeks: (CalendarDay | null)[][] = []
+  for (let i = 0; i < padded.length; i += 7) {
+    const week = padded.slice(i, i + 7)
+    while (week.length < 7) week.push(null)
+    weeks.push(week)
   }
 
-  const cellColor = (entry: { count: number; avgScore: number }) => {
-    if (entry.count === 0) return 'bg-gray-100'
-    if (entry.avgScore >= 80) return 'bg-blue-500'
-    if (entry.avgScore >= 50) return 'bg-blue-300'
+  const cellColor = (day: CalendarDay) => {
+    if (day.count === 0) return 'bg-gray-100'
+    if (day.avgScore >= 80) return 'bg-blue-500'
+    if (day.avgScore >= 50) return 'bg-blue-300'
     return 'bg-blue-200'
   }
 
@@ -208,27 +221,35 @@ function CalendarHeatmap({ calendar }: { calendar: { date: string; count: number
       <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
         Activity — last 10 weeks
       </p>
-      {/* Day labels */}
-      <div className="mb-1 flex gap-1 pl-0">
-        {dayLabels.map((d, i) => (
-          <div key={i} className="w-6 text-center text-xs text-gray-300">{d}</div>
-        ))}
-      </div>
-      {/* Grid: each row = one week */}
-      <div className="flex flex-col gap-1">
-        {weeks.map((week, wi) => (
-          <div key={wi} className="flex gap-1">
-            {week.map((day) => (
-              <div
-                key={day.date}
-                title={`${day.date}${day.count > 0 ? ` · ${day.count} lesson${day.count > 1 ? 's' : ''}${day.avgScore > 0 ? ` · avg ${day.avgScore}%` : ''}` : ''}`}
-                className={`h-6 w-6 rounded-sm transition-all ${cellColor(day)} ${
-                  day.date === today ? 'ring-2 ring-blue-400 ring-offset-1' : ''
-                }`}
-              />
+      <div className="overflow-x-auto">
+        <div className="flex gap-1" style={{ minWidth: 'max-content' }}>
+          {/* Day-of-week labels */}
+          <div className="flex flex-col gap-1 pr-1">
+            {dayLabels.map((d, i) => (
+              <div key={i} className="flex h-5 w-4 items-center text-xs text-gray-300">
+                {i % 2 === 1 ? d : ''}
+              </div>
             ))}
           </div>
-        ))}
+          {/* Week columns */}
+          {weeks.map((week, wi) => (
+            <div key={wi} className="flex flex-col gap-1">
+              {week.map((day, di) =>
+                day ? (
+                  <div
+                    key={day.date}
+                    title={`${day.date}${day.count > 0 ? ` · ${day.count} lesson${day.count > 1 ? 's' : ''}${day.avgScore > 0 ? ` · avg ${day.avgScore}%` : ''}` : ''}`}
+                    className={`h-5 w-5 rounded-sm transition-all ${cellColor(day)} ${
+                      day.date === today ? 'ring-2 ring-blue-400 ring-offset-1' : ''
+                    }`}
+                  />
+                ) : (
+                  <div key={di} className="h-5 w-5" />
+                )
+              )}
+            </div>
+          ))}
+        </div>
       </div>
       <div className="mt-3 flex items-center gap-2 text-xs text-gray-400">
         <span>Less</span>
