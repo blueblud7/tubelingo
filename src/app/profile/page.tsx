@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { getSupabase } from '@/lib/supabase'
 import Link from 'next/link'
+import OfflineSaveButton from '@/components/ui/OfflineSaveButton'
 
 interface Profile {
   id: string
@@ -139,6 +140,9 @@ export default function ProfilePage() {
           </div>
         )}
       </div>
+
+      {/* Offline mode — Pro only */}
+      {profile && <OfflineSaveButton plan={profile.plan} />}
 
       {/* Sign out */}
       <button

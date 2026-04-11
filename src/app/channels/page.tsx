@@ -57,6 +57,7 @@ export default function ChannelsPage() {
         body: JSON.stringify({ url: channelUrl }),
       })
       const data = await res.json()
+      if (res.status === 403) throw new Error(data.error + '\n\n👉 /subscribe 에서 Pro로 업그레이드하세요.')
       if (!res.ok) throw new Error(data.error)
       setChannels((prev) => [data, ...prev])
       if (inputRef.current) inputRef.current.value = ''

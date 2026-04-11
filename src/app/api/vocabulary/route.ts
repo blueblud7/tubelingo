@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient, getCurrentUser } from '@/lib/supabase'
+import { checkVocabularyLimit, FREE_LIMITS } from '@/lib/plans'
 
 // GET /api/vocabulary — list saved words for current user
 export async function GET() {
@@ -22,6 +23,18 @@ export async function POST(req: NextRequest) {
   if (!word || !definition) return NextResponse.json({ error: 'word and definition required' }, { status: 400 })
 
   const user = await getCurrentUser()
+
+  // Free plan: max 100 words
+  if (user) {
+    const limit = await checkVocabularyLimit(user.id)
+    if (!limit.allowed) {
+      return NextResponse.json(
+        { error: `Free plan allows up to ${FREE_LIMITS.vocabulary} saved words. Upgrade to Pro for unlimited vocabulary.`, code: 'VOCAB_LIMIT' },
+        { status: 403 }
+      )
+    }
+  }
+
   const db = createServiceClient()
   const { data, error } = await db
     .from('user_vocabulary')

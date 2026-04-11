@@ -1,7 +1,7 @@
 import { createServiceClient } from '@/lib/supabase'
 
 // Create a lesson record after a video is processed
-export async function createLesson(videoId: string) {
+export async function createLesson(videoId: string, userId?: string) {
   const db = createServiceClient()
   await db
     .from('lessons')
@@ -10,6 +10,7 @@ export async function createLesson(videoId: string) {
         video_id: videoId,
         assigned_date: new Date().toISOString().split('T')[0],
         status: 'pending',
+        ...(userId ? { user_id: userId } : {}),
       },
       { onConflict: 'video_id' }
     )

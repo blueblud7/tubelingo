@@ -4,6 +4,7 @@ import { extractChannelId, buildRssUrl, fetchChannelRSS } from '@/lib/rss'
 import { fetchTranscript } from '@/lib/transcript'
 import { analyzeTranscript } from '@/lib/openai'
 import { createLesson } from '@/lib/lesson'
+import { checkChannelLimit, FREE_LIMITS } from '@/lib/plans'
 
 // GET /api/channels — list channels for current user
 export async function GET() {
@@ -27,9 +28,20 @@ export async function POST(req: NextRequest) {
     const feed = await fetchChannelRSS(channelId)
 
     const db = createServiceClient()
+    const user = await getCurrentUser()
+
+    // Free plan: max 2 channels
+    if (user) {
+      const limit = await checkChannelLimit(user.id)
+      if (!limit.allowed) {
+        return NextResponse.json(
+          { error: `Free plan allows up to ${FREE_LIMITS.channels} channels. Upgrade to Pro for unlimited channels.`, code: 'CHANNEL_LIMIT' },
+          { status: 403 }
+        )
+      }
+    }
 
     // Upsert channel and increment subscriber_count
-    const user = await getCurrentUser()
     const { data: existing } = await db.from('channels').select('subscriber_count').eq('youtube_id', channelId).single()
     const { data, error } = await db
       .from('channels')
@@ -50,7 +62,7 @@ export async function POST(req: NextRequest) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
     // Fire-and-forget: process the latest video immediately
-    processLatestVideo(data.id, channelId, data.language ?? 'en', feed).catch(() => {})
+    processLatestVideo(data.id, channelId, data.language ?? 'en', feed, user?.id).catch(() => {})
 
     return NextResponse.json(data)
   } catch (err) {
@@ -62,7 +74,8 @@ async function processLatestVideo(
   channelDbId: string,
   channelId: string,
   language: string,
-  feed: Awaited<ReturnType<typeof fetchChannelRSS>>
+  feed: Awaited<ReturnType<typeof fetchChannelRSS>>,
+  userId?: string
 ) {
   const db = createServiceClient()
   const item = feed.items?.[0]
@@ -78,7 +91,7 @@ async function processLatestVideo(
     .eq('youtube_video_id', videoId)
     .single()
   if (existing) {
-    if (existing.processed) await createLesson(existing.id)
+    if (existing.processed) await createLesson(existing.id, userId)
     return
   }
 
@@ -113,7 +126,7 @@ async function processLatestVideo(
     }))
   )
   await db.from('videos').update({ processed: true }).eq('id', video.id)
-  await createLesson(video.id)
+  await createLesson(video.id, userId)
 }
 
 // DELETE /api/channels?id=...

@@ -1,14 +1,16 @@
-import { createServiceClient } from '@/lib/supabase'
+import { createServiceClient, getCurrentUser } from '@/lib/supabase'
 import { fetchChannelRSS } from '@/lib/rss'
 import { fetchTranscript } from '@/lib/transcript'
 import { analyzeTranscript } from '@/lib/openai'
 import { createLesson } from '@/lib/lesson'
+import { checkMonthlyLessonLimit, FREE_LIMITS } from '@/lib/plans'
 
 export const maxDuration = 60
 
 // POST /api/rss — poll channels and stream progress via SSE
 export async function POST() {
   const encoder = new TextEncoder()
+  const user = await getCurrentUser()
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -17,8 +19,23 @@ export async function POST() {
       }
 
       try {
+        // Free plan: check monthly lesson limit upfront
+        if (user) {
+          const limit = await checkMonthlyLessonLimit(user.id)
+          if (!limit.allowed) {
+            send(
+              `Monthly limit reached (${limit.current}/${FREE_LIMITS.lessonsPerMonth} lessons). Upgrade to Pro for unlimited lessons.`,
+              'error'
+            )
+            controller.close()
+            return
+          }
+        }
+
         const db = createServiceClient()
-        const { data: channels, error } = await db.from('channels').select('*')
+        let query = db.from('channels').select('*')
+        if (user) query = query.eq('user_id', user.id)
+        const { data: channels, error } = await query
         if (error) throw error
 
         if (!channels || channels.length === 0) {
@@ -36,7 +53,18 @@ export async function POST() {
           'checking'
         )
 
+        let lessonsCreated = 0
+
         for (const channel of activeChannels) {
+          // Re-check limit before each channel in case multiple videos get created
+          if (user) {
+            const limit = await checkMonthlyLessonLimit(user.id)
+            if (!limit.allowed) {
+              send(`Monthly limit reached (${limit.current}/${FREE_LIMITS.lessonsPerMonth}). Upgrade to Pro for more.`, 'skipped')
+              break
+            }
+          }
+
           send(`Fetching feed: ${channel.name}`, 'checking')
           const feed = await fetchChannelRSS(channel.youtube_id)
           const latestItems = feed.items?.slice(0, 3) ?? []
@@ -53,7 +81,10 @@ export async function POST() {
               .single()
 
             if (existing) {
-              if (existing.processed) await createLesson(existing.id)
+              if (existing.processed) {
+                await createLesson(existing.id, user?.id)
+                lessonsCreated++
+              }
               continue
             }
 
@@ -96,7 +127,8 @@ export async function POST() {
               await db.from('videos').update({ processed: true }).eq('id', video.id)
 
               send(`Creating lesson...`, 'creating')
-              await createLesson(video.id)
+              await createLesson(video.id, user?.id)
+              lessonsCreated++
 
               send(`Lesson ready: "${item.title?.slice(0, 50)}"`, 'ready')
             } catch (err) {

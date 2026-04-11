@@ -17,6 +17,7 @@ export default function SentenceCard({ sentence, index, total, youtubeVideoId, o
   const [expandedWord, setExpandedWord] = useState<string | null>(null)
   const [savedWords, setSavedWords] = useState<Set<string>>(new Set())
   const [savingWord, setSavingWord] = useState<string | null>(null)
+  const [vocabLimitHit, setVocabLimitHit] = useState(false)
   const [showVideo, setShowVideo] = useState(false)
 
   // STT state
@@ -49,7 +50,7 @@ export default function SentenceCard({ sentence, index, total, youtubeVideoId, o
     if (!v) return
     setSavingWord(word)
     try {
-      await fetch('/api/vocabulary', {
+      const res = await fetch('/api/vocabulary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -60,6 +61,10 @@ export default function SentenceCard({ sentence, index, total, youtubeVideoId, o
           source_sentence: sentence.text,
         }),
       })
+      if (res.status === 403) {
+        setVocabLimitHit(true)
+        return
+      }
       setSavedWords((prev) => new Set(prev).add(word))
     } finally {
       setSavingWord(null)
@@ -223,6 +228,14 @@ export default function SentenceCard({ sentence, index, total, youtubeVideoId, o
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Vocab limit banner */}
+      {vocabLimitHit && (
+        <div className="rounded-xl bg-orange-50 border border-orange-200 px-4 py-3 text-sm">
+          <p className="font-medium text-orange-700">Vocabulary limit reached (Free: 100 words)</p>
+          <a href="/subscribe" className="text-orange-600 underline text-xs">Upgrade to Pro for unlimited →</a>
         </div>
       )}
 
