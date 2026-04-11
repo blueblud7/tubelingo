@@ -1,14 +1,17 @@
 import { NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase'
+import { createServiceClient, getCurrentUser } from '@/lib/supabase'
 
 export async function GET() {
+  const user = await getCurrentUser()
   const db = createServiceClient()
 
-  const { data: lessons, error } = await db
+  let lessonsQuery = db
     .from('lessons')
     .select('assigned_date, status, score, completed_at')
     .eq('status', 'completed')
     .order('assigned_date', { ascending: false })
+  if (user) lessonsQuery = lessonsQuery.eq('user_id', user.id)
+  const { data: lessons, error } = await lessonsQuery
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
@@ -76,13 +79,20 @@ export async function GET() {
   }
 
   // --- Today's progress ---
-  const { data: todayLessons } = await db
-    .from('lessons')
-    .select('status')
-    .eq('assigned_date', todayStr)
+  let todayQuery = db.from('lessons').select('status').eq('assigned_date', todayStr)
+  if (user) todayQuery = todayQuery.eq('user_id', user.id)
+  const { data: todayLessons } = await todayQuery
 
   const todayTotal = todayLessons?.length ?? 0
   const todayDone = todayLessons?.filter((l) => l.status === 'completed').length ?? 0
+
+  // --- SM-2 review due count ---
+  let vocabQuery = db
+    .from('user_vocabulary')
+    .select('*', { count: 'exact', head: true })
+    .lte('next_review', todayStr)
+  if (user) vocabQuery = vocabQuery.eq('user_id', user.id)
+  const { count: reviewDue } = await vocabQuery
 
   return NextResponse.json({
     streak,
@@ -91,5 +101,6 @@ export async function GET() {
     todayTotal,
     todayDone,
     calendar,
+    reviewDue: reviewDue ?? 0,
   })
 }

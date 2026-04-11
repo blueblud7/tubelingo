@@ -7,10 +7,17 @@ const links = [
   { href: '/', label: 'Home', icon: '🏠' },
   { href: '/vocabulary', label: 'Words', icon: '📖' },
   { href: '/channels', label: 'Channels', icon: '📺' },
+  { href: '/teacher', label: 'Teach', icon: '🎓' },
+  { href: '/profile', label: 'Profile', icon: '👤' },
 ]
 
 export default function BottomNav() {
   const pathname = usePathname()
+
+  // Hide nav on auth/onboarding pages
+  const hidden = pathname.startsWith('/auth') || pathname.startsWith('/onboarding')
+  if (hidden) return null
+
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-10 border-t border-gray-200 bg-white">
       <div className="mx-auto flex max-w-md">

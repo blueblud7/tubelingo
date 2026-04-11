@@ -1,21 +1,40 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AnalyzedSentence } from '@/types'
 
 interface Props {
-  sentence: AnalyzedSentence
+  sentence: AnalyzedSentence & { id: string }
   index: number
   total: number
+  youtubeVideoId?: string
   onGotIt: () => void
   onReview: () => void
 }
 
-export default function SentenceCard({ sentence, index, total, onGotIt, onReview }: Props) {
+export default function SentenceCard({ sentence, index, total, youtubeVideoId, onGotIt, onReview }: Props) {
   const [showTranslation, setShowTranslation] = useState(false)
   const [expandedWord, setExpandedWord] = useState<string | null>(null)
   const [savedWords, setSavedWords] = useState<Set<string>>(new Set())
   const [savingWord, setSavingWord] = useState<string | null>(null)
+  const [showVideo, setShowVideo] = useState(false)
+
+  // STT state
+  const [sttState, setSttState] = useState<'idle' | 'listening' | 'result'>('idle')
+  const [sttTranscript, setSttTranscript] = useState('')
+  const [sttScore, setSttScore] = useState<number | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<any>(null)
+
+  // Reset video/STT when sentence changes
+  useEffect(() => {
+    setShowTranslation(false)
+    setExpandedWord(null)
+    setShowVideo(false)
+    setSttState('idle')
+    setSttTranscript('')
+    setSttScore(null)
+  }, [sentence.text])
 
   const difficultyColor = {
     1: 'bg-green-100 text-green-700',
@@ -23,7 +42,7 @@ export default function SentenceCard({ sentence, index, total, onGotIt, onReview
     3: 'bg-yellow-100 text-yellow-700',
     4: 'bg-orange-100 text-orange-700',
     5: 'bg-red-100 text-red-700',
-  }[sentence.difficulty]
+  }[sentence.difficulty] ?? 'bg-gray-100 text-gray-700'
 
   const saveWord = async (word: string) => {
     const v = sentence.vocabulary.find((v) => v.word === word)
@@ -47,17 +66,85 @@ export default function SentenceCard({ sentence, index, total, onGotIt, onReview
     }
   }
 
+  // ── STT ─────────────────────────────────────────────────────────────────────
+
+  const startSTT = () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const win = window as any
+    const SR = win.SpeechRecognition ?? win.webkitSpeechRecognition
+    if (!SR) {
+      alert('This browser does not support speech recognition.')
+      return
+    }
+
+    const recognition = new SR()
+    recognition.lang = 'en-US'
+    recognition.interimResults = false
+    recognition.maxAlternatives = 1
+    recognitionRef.current = recognition
+
+    recognition.onstart = () => setSttState('listening')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recognition.onresult = (event: any) => {
+      const spoken = event.results[0][0].transcript.trim()
+      setSttTranscript(spoken)
+      setSttScore(calcSimilarity(spoken, sentence.text))
+      setSttState('result')
+    }
+    recognition.onerror = () => setSttState('idle')
+    recognition.onend = () => {
+      if (sttState === 'listening') setSttState('idle')
+    }
+    recognition.start()
+  }
+
+  const stopSTT = () => {
+    recognitionRef.current?.stop()
+    setSttState('idle')
+  }
+
+  // ── YouTube iframe ───────────────────────────────────────────────────────────
+
+  const hasTimestamp = youtubeVideoId && sentence.timestamp != null && sentence.timestamp > 0
+  const videoSrc = hasTimestamp
+    ? `https://www.youtube.com/embed/${youtubeVideoId}?start=${Math.floor(sentence.timestamp!)}&autoplay=1`
+    : youtubeVideoId
+    ? `https://www.youtube.com/embed/${youtubeVideoId}?autoplay=1`
+    : null
+
   return (
     <div className="flex flex-col gap-4 rounded-2xl bg-white p-6 shadow-md">
       {/* Header */}
       <div className="flex items-center justify-between text-sm text-gray-400">
-        <span>
-          {index + 1} / {total}
-        </span>
-        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${difficultyColor}`}>
-          Lv {sentence.difficulty}
-        </span>
+        <span>{index + 1} / {total}</span>
+        <div className="flex items-center gap-2">
+          {/* Video play button — F-L05 */}
+          {videoSrc && (
+            <button
+              onClick={() => setShowVideo(!showVideo)}
+              className="rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-medium text-red-500 hover:bg-red-100"
+              title="Play video clip"
+            >
+              ▶ Clip
+            </button>
+          )}
+          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${difficultyColor}`}>
+            Lv {sentence.difficulty}
+          </span>
+        </div>
       </div>
+
+      {/* YouTube clip — F-L05 */}
+      {showVideo && videoSrc && (
+        <div className="relative w-full overflow-hidden rounded-xl" style={{ paddingBottom: '56.25%' }}>
+          <iframe
+            src={videoSrc}
+            className="absolute inset-0 h-full w-full"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
+        </div>
+      )}
 
       {/* Sentence */}
       <p className="text-xl font-medium leading-relaxed text-gray-900">{sentence.text}</p>
@@ -139,6 +226,43 @@ export default function SentenceCard({ sentence, index, total, onGotIt, onReview
         </div>
       )}
 
+      {/* Pronunciation practice — F-L06 */}
+      <div className="flex flex-col gap-2">
+        {sttState === 'idle' && (
+          <button
+            onClick={startSTT}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
+          >
+            🎤 Practice pronunciation
+          </button>
+        )}
+        {sttState === 'listening' && (
+          <button
+            onClick={stopSTT}
+            className="flex w-full animate-pulse items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 py-2.5 text-sm font-medium text-red-600"
+          >
+            ⏹ Listening... tap to stop
+          </button>
+        )}
+        {sttState === 'result' && sttScore !== null && (
+          <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-sm">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="font-medium text-gray-700">Your pronunciation</span>
+              <span className={`font-bold ${sttScore >= 80 ? 'text-green-600' : sttScore >= 50 ? 'text-yellow-600' : 'text-red-500'}`}>
+                {sttScore}%
+              </span>
+            </div>
+            <p className="italic text-gray-500">"{sttTranscript}"</p>
+            <button
+              onClick={() => { setSttState('idle'); setSttTranscript(''); setSttScore(null) }}
+              className="mt-2 text-xs text-blue-500 underline"
+            >
+              Try again
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Action buttons */}
       <div className="mt-2 flex gap-3">
         <button
@@ -156,4 +280,18 @@ export default function SentenceCard({ sentence, index, total, onGotIt, onReview
       </div>
     </div>
   )
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+function normalize(s: string) {
+  return s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim()
+}
+
+function calcSimilarity(spoken: string, target: string): number {
+  const a = normalize(spoken).split(/\s+/)
+  const b = normalize(target).split(/\s+/)
+  const setB = new Set(b)
+  const matches = a.filter((w) => setB.has(w)).length
+  return Math.round((matches / Math.max(b.length, 1)) * 100)
 }

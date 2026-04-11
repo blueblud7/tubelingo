@@ -124,6 +124,7 @@ export default function LessonPage() {
           sentence={sentence}
           index={index}
           total={sentences.length}
+          youtubeVideoId={lesson.video.youtube_video_id}
           onGotIt={handleGotIt}
           onReview={handleReview}
         />

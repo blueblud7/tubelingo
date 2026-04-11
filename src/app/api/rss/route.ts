@@ -27,9 +27,16 @@ export async function POST() {
           return
         }
 
-        send(`Checking ${channels.length} channel${channels.length > 1 ? 's' : ''} for updates...`, 'checking')
+        // F-C04: only process channels with auto_generate enabled
+        const activeChannels = channels.filter((c) => c.auto_generate !== false)
+        const skippedCount = channels.length - activeChannels.length
 
-        for (const channel of channels) {
+        send(
+          `Checking ${activeChannels.length} channel${activeChannels.length !== 1 ? 's' : ''}${skippedCount > 0 ? ` (${skippedCount} paused)` : ''} for updates...`,
+          'checking'
+        )
+
+        for (const channel of activeChannels) {
           send(`Fetching feed: ${channel.name}`, 'checking')
           const feed = await fetchChannelRSS(channel.youtube_id)
           const latestItems = feed.items?.slice(0, 3) ?? []

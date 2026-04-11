@@ -16,12 +16,14 @@ interface VocabEntry {
 }
 
 type View = 'list' | 'flashcard'
+type Filter = 'all' | 'due' | 'learned'
 
 export default function VocabularyPage() {
   const [words, setWords] = useState<VocabEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState<View>('list')
-  const [dueOnly, setDueOnly] = useState(false)
+  const [filter, setFilter] = useState<Filter>('all')
+  const [search, setSearch] = useState('')
 
   const today = new Date().toISOString().split('T')[0]
 
@@ -34,11 +36,35 @@ export default function VocabularyPage() {
   useEffect(() => { fetchWords() }, [])
 
   const dueWords = words.filter((w) => w.next_review <= today)
-  const studyWords = dueOnly ? dueWords : words
+  const learnedWords = words.filter((w) => w.repetitions >= 3 && w.next_review > today)
+
+  const filteredByType = filter === 'due' ? dueWords : filter === 'learned' ? learnedWords : words
+
+  const filteredWords = search.trim()
+    ? filteredByType.filter(
+        (w) =>
+          w.word.toLowerCase().includes(search.toLowerCase()) ||
+          w.definition.toLowerCase().includes(search.toLowerCase())
+      )
+    : filteredByType
+
+  const studyWords = filter === 'due' ? dueWords : words
 
   const removeWord = async (id: string) => {
     await fetch(`/api/vocabulary/${id}`, { method: 'DELETE' })
     setWords((prev) => prev.filter((w) => w.id !== id))
+  }
+
+  const shareWord = async (w: VocabEntry) => {
+    const text = `${w.word}\n${w.pronunciation ? w.pronunciation + '\n' : ''}${w.definition}${w.source_sentence ? '\n\n"' + w.source_sentence + '"' : ''}\n\n— TubeLingo`
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({ title: w.word, text })
+        return
+      } catch {}
+    }
+    await navigator.clipboard.writeText(text)
+    alert('Copied to clipboard!')
   }
 
   if (loading) {
@@ -55,10 +81,10 @@ export default function VocabularyPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6 p-5">
+    <div className="flex flex-col gap-4 p-5">
       <div className="pt-4">
         <h1 className="text-2xl font-bold text-gray-900">Vocabulary</h1>
-        <p className="text-sm text-gray-500">{words.length} words saved</p>
+        <p className="text-sm text-gray-500">{words.length} words saved{dueWords.length > 0 ? ` · ${dueWords.length} due` : ''}</p>
       </div>
 
       {words.length === 0 ? (
@@ -74,55 +100,99 @@ export default function VocabularyPage() {
           {/* Study buttons */}
           <div className="flex gap-3">
             <button
-              onClick={() => { setDueOnly(false); setView('flashcard') }}
+              onClick={() => { setFilter('all'); setView('flashcard') }}
               className="flex-1 rounded-xl bg-blue-500 py-3 text-sm font-medium text-white"
             >
               Study all ({words.length})
             </button>
             {dueWords.length > 0 && (
               <button
-                onClick={() => { setDueOnly(true); setView('flashcard') }}
-                className="flex-1 rounded-xl border border-blue-300 py-3 text-sm font-medium text-blue-600"
+                onClick={() => { setFilter('due'); setView('flashcard') }}
+                className="flex-1 rounded-xl border border-orange-300 py-3 text-sm font-medium text-orange-600"
               >
-                Due today ({dueWords.length})
+                Due ({dueWords.length})
               </button>
             )}
           </div>
 
-          {/* Word list */}
-          <div className="flex flex-col gap-2">
-            {words.map((w) => {
-              const isDue = w.next_review <= today
+          {/* Search — F-V03 */}
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search words..."
+            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:border-blue-400 focus:outline-none"
+          />
+
+          {/* Filter pills — F-V03 */}
+          <div className="flex gap-2">
+            {(['all', 'due', 'learned'] as Filter[]).map((f) => {
+              const count = f === 'all' ? words.length : f === 'due' ? dueWords.length : learnedWords.length
               return (
-                <div key={w.id} className="flex items-start gap-3 rounded-2xl bg-white p-4 shadow-sm">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-gray-900">{w.word}</span>
-                      {w.part_of_speech && (
-                        <span className="text-xs text-gray-400">({w.part_of_speech})</span>
-                      )}
-                      {isDue && (
-                        <span className="rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-600">
-                          Due
-                        </span>
-                      )}
-                    </div>
-                    {w.pronunciation && <p className="text-xs text-gray-400">{w.pronunciation}</p>}
-                    <p className="mt-0.5 text-sm text-gray-600">{w.definition}</p>
-                    <p className="mt-1 text-xs text-gray-400">
-                      Next review: {w.next_review} · Streak: {w.repetitions}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => removeWord(w.id)}
-                    className="text-sm text-gray-300 hover:text-red-400"
-                  >
-                    ×
-                  </button>
-                </div>
+                <button
+                  key={f}
+                  onClick={() => setFilter(f)}
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                    filter === f
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-gray-100 text-gray-600'
+                  }`}
+                >
+                  {f.charAt(0).toUpperCase() + f.slice(1)} ({count})
+                </button>
               )
             })}
           </div>
+
+          {/* Word list */}
+          {filteredWords.length === 0 ? (
+            <p className="py-10 text-center text-sm text-gray-400">No words match</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {filteredWords.map((w) => {
+                const isDue = w.next_review <= today
+                return (
+                  <div key={w.id} className="flex items-start gap-3 rounded-2xl bg-white p-4 shadow-sm">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-gray-900">{w.word}</span>
+                        {w.part_of_speech && (
+                          <span className="text-xs text-gray-400">({w.part_of_speech})</span>
+                        )}
+                        {isDue && (
+                          <span className="rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-600">
+                            Due
+                          </span>
+                        )}
+                      </div>
+                      {w.pronunciation && <p className="text-xs text-gray-400">{w.pronunciation}</p>}
+                      <p className="mt-0.5 text-sm text-gray-600">{w.definition}</p>
+                      <p className="mt-1 text-xs text-gray-400">
+                        Next review: {w.next_review} · Streak: {w.repetitions}
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      {/* F-V04: Share */}
+                      <button
+                        onClick={() => shareWord(w)}
+                        className="text-sm text-gray-300 hover:text-blue-400"
+                        title="Share word"
+                      >
+                        ↗
+                      </button>
+                      <button
+                        onClick={() => removeWord(w.id)}
+                        className="text-sm text-gray-300 hover:text-red-400"
+                        title="Remove word"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </>
       )}
     </div>
@@ -136,11 +206,19 @@ function FlashcardMode({ words, onDone }: { words: VocabEntry[]; onDone: () => v
 
   const current = words[index]
 
+  const shareWord = async (w: VocabEntry) => {
+    const text = `${w.word}\n${w.pronunciation ? w.pronunciation + '\n' : ''}${w.definition}\n\n— TubeLingo`
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try { await navigator.share({ title: w.word, text }); return } catch {}
+    }
+    await navigator.clipboard.writeText(text)
+    alert('Copied to clipboard!')
+  }
+
   const handleAnswer = async (quality: number) => {
     const newResults = [...results, { id: current.id, quality }]
     setResults(newResults)
 
-    // Update SM-2 in background
     fetch(`/api/vocabulary/${current.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -202,10 +280,22 @@ function FlashcardMode({ words, onDone }: { words: VocabEntry[]; onDone: () => v
           </div>
         ) : (
           <div className="flex flex-col gap-3">
-            <p className="text-2xl font-bold text-blue-800">{current.word}</p>
-            {current.part_of_speech && (
-              <p className="text-sm text-blue-500">({current.part_of_speech})</p>
-            )}
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-2xl font-bold text-blue-800">{current.word}</p>
+                {current.part_of_speech && (
+                  <p className="text-sm text-blue-500">({current.part_of_speech})</p>
+                )}
+              </div>
+              {/* F-V04: Share in flashcard mode */}
+              <button
+                onClick={(e) => { e.stopPropagation(); shareWord(current) }}
+                className="text-xl text-gray-300 hover:text-blue-400"
+                title="Share"
+              >
+                ↗
+              </button>
+            </div>
             <p className="text-gray-700">{current.definition}</p>
             {current.source_sentence && (
               <p className="mt-2 rounded-lg bg-white px-3 py-2 text-sm italic text-gray-500">
@@ -216,7 +306,7 @@ function FlashcardMode({ words, onDone }: { words: VocabEntry[]; onDone: () => v
         )}
       </div>
 
-      {/* Answer buttons - only show after flip */}
+      {/* Answer buttons */}
       {flipped && (
         <div className="flex gap-3">
           <button

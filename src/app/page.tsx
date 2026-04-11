@@ -31,6 +31,7 @@ interface Stats {
   todayTotal: number
   todayDone: number
   calendar: { date: string; count: number; avgScore: number }[]
+  reviewDue: number
 }
 
 export default function HomePage() {
@@ -104,6 +105,9 @@ export default function HomePage() {
       {/* Stats */}
       {stats && <StatsBar stats={stats} />}
 
+      {/* Quick Actions — F-H05 */}
+      <QuickActions reviewDue={stats?.reviewDue ?? 0} hasLessons={lessons.length > 0} />
+
       {loading ? (
         <div className="flex items-center justify-center py-20 text-gray-400">Loading...</div>
       ) : processing ? (
@@ -133,7 +137,7 @@ export default function HomePage() {
 // ── Stats Bar ──────────────────────────────────────────────────────────────────
 
 function StatsBar({ stats }: { stats: Stats }) {
-  const { streak, totalCompleted, todayDone, todayTotal, calendar, longestStreak } = stats
+  const { streak, totalCompleted, todayDone, todayTotal, calendar, longestStreak, reviewDue } = stats
 
   return (
     <div className="flex flex-col gap-3">
@@ -148,10 +152,15 @@ function StatsBar({ stats }: { stats: Stats }) {
             <span className="text-xs text-gray-300">best {longestStreak}</span>
           )}
         </div>
-        <div className="flex flex-1 flex-col items-center gap-0.5 rounded-2xl bg-white py-4 shadow-sm">
+        <Link href="/vocabulary" className="flex flex-1 flex-col items-center gap-0.5 rounded-2xl bg-white py-4 shadow-sm relative">
           <span className="text-2xl font-bold text-gray-900">✅ {totalCompleted}</span>
           <span className="text-xs text-gray-400">lessons done</span>
-        </div>
+          {reviewDue > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-orange-500 px-1 text-xs font-bold text-white">
+              {reviewDue}
+            </span>
+          )}
+        </Link>
       </div>
 
       {/* Today progress */}
@@ -307,6 +316,36 @@ function LessonCard({ lesson }: { lesson: LessonEntry }) {
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── Quick Actions ──────────────────────────────────────────────────────────────
+
+function QuickActions({ reviewDue, hasLessons }: { reviewDue: number; hasLessons: boolean }) {
+  return (
+    <div className="flex gap-3">
+      <Link
+        href="/channels"
+        className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white py-3 text-sm font-medium text-gray-700 shadow-sm"
+      >
+        <span>+</span> Add Channel
+      </Link>
+      {reviewDue > 0 ? (
+        <Link
+          href="/vocabulary"
+          className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-orange-500 py-3 text-sm font-medium text-white shadow-sm"
+        >
+          📖 Review {reviewDue}
+        </Link>
+      ) : hasLessons ? (
+        <Link
+          href="/vocabulary"
+          className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white py-3 text-sm font-medium text-gray-700 shadow-sm"
+        >
+          📖 Vocabulary
+        </Link>
+      ) : null}
     </div>
   )
 }

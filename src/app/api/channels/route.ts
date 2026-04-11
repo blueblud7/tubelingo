@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase'
+import { createServiceClient, getCurrentUser } from '@/lib/supabase'
 import { extractChannelId, buildRssUrl, fetchChannelRSS } from '@/lib/rss'
 import { fetchTranscript } from '@/lib/transcript'
 import { analyzeTranscript } from '@/lib/openai'
 import { createLesson } from '@/lib/lesson'
 
-// GET /api/channels — list all channels
+// GET /api/channels — list channels for current user
 export async function GET() {
+  const user = await getCurrentUser()
   const db = createServiceClient()
-  const { data, error } = await db.from('channels').select('*').order('created_at', { ascending: false })
+  let query = db.from('channels').select('*').order('created_at', { ascending: false })
+  if (user) query = query.eq('user_id', user.id)
+  const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(data)
 }
@@ -26,6 +29,7 @@ export async function POST(req: NextRequest) {
     const db = createServiceClient()
 
     // Upsert channel and increment subscriber_count
+    const user = await getCurrentUser()
     const { data: existing } = await db.from('channels').select('subscriber_count').eq('youtube_id', channelId).single()
     const { data, error } = await db
       .from('channels')
@@ -36,6 +40,7 @@ export async function POST(req: NextRequest) {
           name: feed.title || 'Unknown Channel',
           language: 'en',
           subscriber_count: (existing?.subscriber_count ?? 0) + 1,
+          ...(user ? { user_id: user.id } : {}),
         },
         { onConflict: 'youtube_id' }
       )

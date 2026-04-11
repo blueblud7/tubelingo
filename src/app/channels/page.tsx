@@ -9,6 +9,7 @@ interface Channel {
   language: string
   category?: string
   subscriber_count?: number
+  auto_generate: boolean
 }
 
 interface RecommendedChannel {
@@ -77,6 +78,20 @@ export default function ChannelsPage() {
     fetchAll()
   }
 
+  const toggleAutoGenerate = async (id: string, current: boolean) => {
+    const optimistic = !current
+    setChannels((prev) => prev.map((c) => c.id === id ? { ...c, auto_generate: optimistic } : c))
+    const res = await fetch(`/api/channels/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ auto_generate: optimistic }),
+    })
+    if (!res.ok) {
+      // Revert on error
+      setChannels((prev) => prev.map((c) => c.id === id ? { ...c, auto_generate: current } : c))
+    }
+  }
+
   const subscribedIds = new Set(channels.map((c) => c.youtube_id))
 
   return (
@@ -123,6 +138,18 @@ export default function ChannelsPage() {
                   <p className="font-medium text-gray-900 truncate">{ch.name}</p>
                   <p className="text-xs text-gray-400">{ch.language.toUpperCase()}</p>
                 </div>
+                {/* F-C04: Auto-generate toggle */}
+                <button
+                  onClick={() => toggleAutoGenerate(ch.id, ch.auto_generate ?? true)}
+                  className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                    (ch.auto_generate ?? true)
+                      ? 'bg-blue-100 text-blue-600'
+                      : 'bg-gray-100 text-gray-400'
+                  }`}
+                  title="Toggle auto lesson generation"
+                >
+                  {(ch.auto_generate ?? true) ? 'Auto ✓' : 'Auto off'}
+                </button>
                 <button
                   onClick={() => remove(ch.id)}
                   className="text-sm text-gray-400 hover:text-red-500 shrink-0"
