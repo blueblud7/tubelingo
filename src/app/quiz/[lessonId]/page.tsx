@@ -14,10 +14,19 @@ interface LessonEntry {
   } | null
 }
 
+function shuffle<T>(arr: T[]): T[] {
+  return [...arr].sort(() => Math.random() - 0.5)
+}
+
 function buildQuizQuestions(sentences: AnalyzedSentence[]): QuizQuestion[] {
   const questions: QuizQuestion[] = []
 
+  // Collect all vocab definitions for distractors
+  const allVocabDefs = sentences.flatMap((s) => s.vocabulary ?? []).map((v) => v.definition)
+  const allIdiomMeanings = sentences.flatMap((s) => s.idioms ?? []).map((i) => i.figurative_meaning)
+
   for (const s of sentences) {
+    // Vocab fill-in-the-blank
     if (s.vocabulary?.length > 0) {
       const vocab = s.vocabulary[0]
       const blanked = s.text.replace(new RegExp(`\\b${vocab.word}\\b`, 'i'), '___')
@@ -25,25 +34,59 @@ function buildQuizQuestions(sentences: AnalyzedSentence[]): QuizQuestion[] {
         questions.push({ type: 'fill_blank', sentence: s, question: blanked, answer: vocab.word })
       }
     }
+
+    // Vocab definition matching
     if (s.vocabulary?.length >= 2) {
       const vocab = s.vocabulary[1]
-      const distractors = sentences
-        .flatMap((x) => x.vocabulary ?? [])
-        .filter((v) => v.word !== vocab.word)
+      const distractors = allVocabDefs.filter((d) => d !== vocab.definition).slice(0, 3)
+      if (distractors.length >= 2) {
+        questions.push({
+          type: 'matching',
+          sentence: s,
+          question: `What does "${vocab.word}" mean?`,
+          options: shuffle([...distractors, vocab.definition]),
+          answer: vocab.definition,
+        })
+      }
+    }
+
+    // Idiom meaning matching
+    if (s.idioms?.length > 0) {
+      const idiom = s.idioms[0]
+      const distractors = allIdiomMeanings.filter((m) => m !== idiom.figurative_meaning).slice(0, 3)
+      if (distractors.length >= 2) {
+        questions.push({
+          type: 'matching',
+          sentence: s,
+          question: `What does "${idiom.phrase}" mean?`,
+          options: shuffle([...distractors, idiom.figurative_meaning]),
+          answer: idiom.figurative_meaning,
+        })
+      }
+    }
+
+    // Grammar fill-in-the-blank (use translation as hint)
+    if (s.grammar_points?.length > 0) {
+      const gp = s.grammar_points[0]
+      // Build a question about the grammar pattern
+      const otherPatterns = sentences
+        .flatMap((x) => x.grammar_points ?? [])
+        .filter((g) => g.pattern !== gp.pattern)
         .slice(0, 3)
-        .map((v) => v.definition)
-      const options = [...distractors, vocab.definition].sort(() => Math.random() - 0.5)
-      questions.push({
-        type: 'matching',
-        sentence: s,
-        question: `What does "${vocab.word}" mean?`,
-        options,
-        answer: vocab.definition,
-      })
+        .map((g) => g.explanation)
+      if (otherPatterns.length >= 2) {
+        questions.push({
+          type: 'matching',
+          sentence: s,
+          question: `The pattern "${gp.pattern}" means:`,
+          options: shuffle([...otherPatterns, gp.explanation]),
+          answer: gp.explanation,
+        })
+      }
     }
   }
 
-  return questions.slice(0, 10)
+  return shuffle(questions).slice(0, 10)
 }
 
 export default function QuizPage() {
@@ -58,12 +101,11 @@ export default function QuizPage() {
   const [isRetry, setIsRetry] = useState(false)
 
   useEffect(() => {
-    fetch('/api/lessons')
+    fetch(`/api/lessons/${lessonId}`)
       .then((r) => r.json())
-      .then((data: LessonEntry[]) => {
-        const found = data.find((l) => l.id === lessonId)
-        if (found?.video?.sentences) {
-          const q = buildQuizQuestions(found.video.sentences)
+      .then((data: LessonEntry) => {
+        if (data?.video?.sentences) {
+          const q = buildQuizQuestions(data.video.sentences)
           setAllQuestions(q)
           setQuestions(q)
         }

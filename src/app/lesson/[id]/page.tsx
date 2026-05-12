@@ -12,7 +12,7 @@ interface LessonEntry {
     id: string
     youtube_video_id: string
     title: string
-    channel: { name: string } | null
+    channel: { name: string; language: string } | null
     sentences: (AnalyzedSentence & { id: string })[]
   } | null
 }
@@ -26,20 +26,17 @@ export default function LessonPage() {
   const [done, setDone] = useState(false)
 
   useEffect(() => {
-    fetch('/api/lessons')
+    fetch(`/api/lessons/${id}`)
       .then((r) => r.json())
-      .then((data: LessonEntry[]) => {
-        const found = data.find((l) => l.id === id)
-        if (found) {
-          setLesson(found)
-          // Mark as in_progress
-          if (found.status === 'pending') {
-            fetch(`/api/lessons/${id}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ status: 'in_progress' }),
-            })
-          }
+      .then((data: LessonEntry) => {
+        if (!data.id) return
+        setLesson(data)
+        if (data.status === 'pending') {
+          fetch(`/api/lessons/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'in_progress' }),
+          })
         }
       })
   }, [id])
@@ -125,6 +122,7 @@ export default function LessonPage() {
           index={index}
           total={sentences.length}
           youtubeVideoId={lesson.video.youtube_video_id}
+          targetLanguage={lesson.video.channel?.language ?? 'en'}
           onGotIt={handleGotIt}
           onReview={handleReview}
         />

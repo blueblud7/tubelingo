@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
   const { data: cls, error: clsError } = await db
     .from('classes')
     .select('id, name')
-    .eq('invite_code', inviteCode.trim().toLowerCase())
+    .ilike('invite_code', inviteCode.trim())
     .single()
 
   if (clsError || !cls) return NextResponse.json({ error: 'Invalid invite code' }, { status: 404 })

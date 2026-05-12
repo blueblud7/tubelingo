@@ -1,7 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import Image from 'next/image'
 
 interface Sentence {
   id: string
@@ -35,11 +37,22 @@ interface Stats {
 }
 
 export default function HomePage() {
+  const router = useRouter()
   const [lessons, setLessons] = useState<LessonEntry[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [processing, setProcessing] = useState(false)
+  const [lessonCountBeforeProcessing, setLessonCountBeforeProcessing] = useState(0)
   const [progressMessages, setProgressMessages] = useState<{ message: string; step: string }[]>([])
+
+  // Onboarding gate
+  useEffect(() => {
+    fetch('/api/profile')
+      .then((r) => r.json())
+      .then((data) => { if (data?.onboarded === false) router.replace('/onboarding') })
+      .catch(() => {})
+  }, [router])
 
   const fetchLessons = () =>
     fetch('/api/lessons')
@@ -48,12 +61,14 @@ export default function HomePage() {
         if (Array.isArray(data)) { setLessons(data); return data }
         return []
       })
+      .catch(() => { setError('Failed to load lessons. Please refresh.'); return [] })
       .finally(() => setLoading(false))
 
   const fetchStats = () =>
     fetch('/api/stats')
       .then((r) => r.json())
       .then((data) => !data.error && setStats(data))
+      .catch(() => {})
 
   useEffect(() => {
     fetchLessons()
@@ -70,11 +85,11 @@ export default function HomePage() {
     if (!processing) return
     const interval = setInterval(() => {
       fetchLessons().then((data) => {
-        if (Array.isArray(data) && data.length > 0) setProcessing(false)
+        if (Array.isArray(data) && data.length > lessonCountBeforeProcessing) setProcessing(false)
       })
     }, 5000)
     return () => clearInterval(interval)
-  }, [processing])
+  }, [processing, lessonCountBeforeProcessing])
 
   // Group by date
   const grouped = lessons.reduce<Record<string, LessonEntry[]>>((acc, lesson) => {
@@ -110,10 +125,17 @@ export default function HomePage() {
 
       {loading ? (
         <div className="flex items-center justify-center py-20 text-gray-400">Loading...</div>
+      ) : error ? (
+        <div className="flex flex-col items-center gap-3 py-20 text-center">
+          <p className="text-sm text-red-500">{error}</p>
+          <button onClick={() => { setError(null); setLoading(true); fetchLessons(); fetchStats() }} className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white">
+            Retry
+          </button>
+        </div>
       ) : processing ? (
         <ProcessingState messages={progressMessages} />
       ) : lessons.length === 0 ? (
-        <EmptyState onStartProcessing={() => setProcessing(true)} onMessages={setProgressMessages} />
+        <EmptyState onStartProcessing={(count) => { setLessonCountBeforeProcessing(count); setProcessing(true) }} onMessages={setProgressMessages} />
       ) : (
         <div className="flex flex-col gap-6">
           {sortedDates.map((date) => (
@@ -198,6 +220,8 @@ type CalendarDay = { date: string; count: number; avgScore: number }
 
 function CalendarHeatmap({ calendar }: { calendar: CalendarDay[] }) {
   const today = new Date().toISOString().split('T')[0]
+
+  if (calendar.length === 0) return null
 
   // GitHub style: columns = weeks (left=old, right=new), rows = day of week (Sun→Sat)
   // Pad the start so column 0, row 0 = Sunday of the oldest week
@@ -289,7 +313,9 @@ function LessonCard({ lesson }: { lesson: LessonEntry }) {
 
   return (
     <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
-      <img src={thumbUrl} alt={video.title} className="h-36 w-full object-cover" />
+      <div className="relative h-36 w-full">
+        <Image src={thumbUrl} alt={video.title} fill className="object-cover" sizes="448px" unoptimized />
+      </div>
       <div className="p-4">
         <p className="text-xs font-medium text-blue-500">{video.channel?.name}</p>
         <h2 className="mt-0.5 line-clamp-2 text-sm font-semibold text-gray-900">{video.title}</h2>
@@ -353,11 +379,11 @@ function QuickActions({ reviewDue, hasLessons }: { reviewDue: number; hasLessons
 // ── Empty State ────────────────────────────────────────────────────────────────
 
 function EmptyState({ onStartProcessing, onMessages }: {
-  onStartProcessing: () => void
+  onStartProcessing: (count: number) => void
   onMessages: (msgs: { message: string; step: string }[]) => void
 }) {
-  const handleFetch = async () => {
-    onStartProcessing()
+  const handleFetch = async (currentCount: number) => {
+    onStartProcessing(currentCount)
     const res = await fetch('/api/rss', { method: 'POST' })
     if (!res.body) return
     const reader = res.body.getReader()
@@ -389,7 +415,7 @@ function EmptyState({ onStartProcessing, onMessages }: {
         <Link href="/channels" className="rounded-xl border border-gray-200 px-5 py-2.5 text-sm font-medium text-gray-600">
           Manage channels
         </Link>
-        <button onClick={handleFetch} className="rounded-xl bg-blue-500 px-5 py-2.5 text-sm font-medium text-white">
+        <button onClick={() => handleFetch(0)} className="rounded-xl bg-blue-500 px-5 py-2.5 text-sm font-medium text-white">
           Fetch lessons now
         </button>
       </div>

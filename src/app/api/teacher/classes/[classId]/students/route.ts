@@ -73,3 +73,20 @@ export async function GET(_req: NextRequest, { params }: RouteCtx) {
 
   return NextResponse.json(result)
 }
+
+// DELETE /api/teacher/classes/[classId]/students?studentId=... — remove student from class
+export async function DELETE(req: NextRequest, { params }: RouteCtx) {
+  const { classId } = await params
+  const user = await getCurrentUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const studentId = req.nextUrl.searchParams.get('studentId')
+  if (!studentId) return NextResponse.json({ error: 'studentId required' }, { status: 400 })
+
+  const db = createServiceClient()
+  const { data: cls } = await db.from('classes').select('teacher_id').eq('id', classId).single()
+  if (!cls || cls.teacher_id !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  await db.from('class_members').delete().eq('class_id', classId).eq('student_id', studentId)
+  return NextResponse.json({ success: true })
+}

@@ -60,12 +60,14 @@ create policy "public read sentences" on sentences for select using (true);
 -- Lessons (date-based history tracking)
 create table if not exists lessons (
   id uuid primary key default gen_random_uuid(),
-  video_id uuid references videos(id) on delete cascade not null unique,
+  video_id uuid references videos(id) on delete cascade not null,
+  user_id uuid references auth.users(id) on delete cascade,
   assigned_date date not null default current_date,
   status text not null default 'pending' check (status in ('pending', 'in_progress', 'completed')),
   score int,
   completed_at timestamptz,
-  created_at timestamptz default now()
+  created_at timestamptz default now(),
+  unique (video_id, user_id)
 );
 
 create index if not exists idx_lessons_date on lessons(assigned_date desc);
@@ -208,6 +210,7 @@ create policy "teachers manage class channels" on class_channels for all
 -- User Vocabulary (flashcard book)
 create table if not exists user_vocabulary (
   id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete cascade,
   word text not null,
   definition text not null,
   part_of_speech text,
@@ -220,10 +223,23 @@ create table if not exists user_vocabulary (
   repetitions int default 0,
   next_review date default current_date,
   created_at timestamptz default now(),
-  constraint unique_word unique (word)
+  constraint unique_word_per_user unique (word, user_id)
 );
 
 create index if not exists idx_vocab_next_review on user_vocabulary(next_review);
+create index if not exists idx_vocab_user on user_vocabulary(user_id);
 
 alter table user_vocabulary enable row level security;
-create policy "public access vocabulary" on user_vocabulary for all using (true);
+drop policy if exists "public access vocabulary" on user_vocabulary;
+create policy "users access own vocabulary" on user_vocabulary for all using (
+  auth.uid() = user_id or user_id is null
+);
+
+-- ============================================================
+-- Migration: fix unique constraints for multi-user support
+-- Run these if upgrading from a previous schema version:
+-- ============================================================
+-- alter table lessons drop constraint if exists lessons_video_id_key;
+-- alter table lessons add constraint if not exists lessons_video_id_user_id_key unique (video_id, user_id);
+-- alter table user_vocabulary drop constraint if exists unique_word;
+-- alter table user_vocabulary add constraint if not exists unique_word_per_user unique (word, user_id);

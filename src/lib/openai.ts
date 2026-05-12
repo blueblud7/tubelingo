@@ -50,6 +50,14 @@ Respond with JSON: {"sentences": [...]}`,
   const content = response.choices[0].message.content
   if (!content) throw new Error('No response from OpenAI')
 
-  const parsed = JSON.parse(content)
+  let parsed: { sentences?: unknown }
+  try {
+    parsed = JSON.parse(content)
+  } catch {
+    throw new Error('OpenAI returned invalid JSON')
+  }
+  if (!Array.isArray(parsed.sentences) || parsed.sentences.length === 0) {
+    throw new Error('OpenAI returned no sentences')
+  }
   return parsed.sentences as AnalyzedSentence[]
 }

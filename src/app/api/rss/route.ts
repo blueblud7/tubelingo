@@ -1,6 +1,6 @@
 import { createServiceClient, getCurrentUser } from '@/lib/supabase'
 import { fetchChannelRSS } from '@/lib/rss'
-import { fetchTranscript } from '@/lib/transcript'
+import { fetchTranscript, TranscriptFetchError } from '@/lib/transcript'
 import { analyzeTranscript } from '@/lib/openai'
 import { createLesson } from '@/lib/lesson'
 import { checkMonthlyLessonLimit, FREE_LIMITS } from '@/lib/plans'
@@ -19,6 +19,17 @@ export async function POST() {
       }
 
       try {
+        const db = createServiceClient()
+
+        // Fetch user profile settings
+        let nativeLang = 'ko'
+        let difficultyPref: 'beginner' | 'intermediate' | 'advanced' | 'mixed' = 'mixed'
+        if (user) {
+          const { data: profile } = await db.from('profiles').select('native_lang, difficulty_pref').eq('id', user.id).single()
+          nativeLang = profile?.native_lang ?? 'ko'
+          difficultyPref = (profile?.difficulty_pref ?? 'mixed') as typeof difficultyPref
+        }
+
         // Free plan: check monthly lesson limit upfront
         if (user) {
           const limit = await checkMonthlyLessonLimit(user.id)
@@ -32,7 +43,6 @@ export async function POST() {
           }
         }
 
-        const db = createServiceClient()
         let query = db.from('channels').select('*')
         if (user) query = query.eq('user_id', user.id)
         const { data: channels, error } = await query
@@ -111,7 +121,7 @@ export async function POST() {
 
               // AI analysis
               send(`Analyzing content with AI...`, 'analyzing')
-              const sentences = await analyzeTranscript(transcript, channel.language, 'en', 'mixed')
+              const sentences = await analyzeTranscript(transcript, channel.language, nativeLang, difficultyPref)
               await db.from('sentences').insert(
                 sentences.map((s) => ({
                   video_id: video.id,
@@ -132,8 +142,18 @@ export async function POST() {
 
               send(`Lesson ready: "${item.title?.slice(0, 50)}"`, 'ready')
             } catch (err) {
-              send(`Skipped (no transcript): "${item.title?.slice(0, 40)}"`, 'skipped')
-              console.error('Transcript error:', err)
+              const errorType = err instanceof TranscriptFetchError ? err.errorType : 'unknown'
+              const errorMsg = err instanceof Error ? err.message : String(err)
+              await db.from('videos').update({
+                transcript_error: errorType,
+                transcript_error_msg: errorMsg,
+              }).eq('id', video.id)
+              const label = errorType === 'disabled' ? 'captions disabled'
+                : errorType === 'blocked' ? 'blocked by YouTube'
+                : errorType === 'unavailable' ? 'video unavailable'
+                : 'no transcript'
+              send(`Skipped (${label}): "${item.title?.slice(0, 40)}"`, 'skipped')
+              console.error('Transcript error:', errorType, errorMsg)
             }
           }
         }

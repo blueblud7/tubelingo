@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { getSupabase } from '@/lib/supabase'
 import Link from 'next/link'
 import OfflineSaveButton from '@/components/ui/OfflineSaveButton'
@@ -15,15 +15,32 @@ interface Profile {
   plan: string
 }
 
-const LANG_LABELS: Record<string, string> = {
-  en: 'English', ko: '한국어', ja: '日本語', es: 'Español', zh: '中文',
-}
+const LANGUAGES = [
+  { code: 'en', label: 'English' },
+  { code: 'ko', label: '한국어' },
+  { code: 'ja', label: '日本語' },
+  { code: 'es', label: 'Español' },
+  { code: 'zh', label: '中文' },
+]
+const LANG_LABELS: Record<string, string> = Object.fromEntries(LANGUAGES.map((l) => [l.code, l.label]))
 
-export default function ProfilePage() {
+const DIFFICULTIES = [
+  { value: 'beginner', label: 'Beginner' },
+  { value: 'intermediate', label: 'Intermediate' },
+  { value: 'advanced', label: 'Advanced' },
+  { value: 'mixed', label: 'Mixed' },
+]
+
+function ProfileContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const checkoutSuccess = searchParams.get('checkout') === 'success'
   const [profile, setProfile] = useState<Profile | null>(null)
   const [email, setEmail] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [draft, setDraft] = useState<Pick<Profile, 'native_lang' | 'target_lang' | 'difficulty_pref'> | null>(null)
 
   useEffect(() => {
     const load = async () => {
@@ -33,11 +50,31 @@ export default function ProfilePage() {
       setEmail(user.email ?? null)
 
       const res = await fetch('/api/profile')
-      if (res.ok) setProfile(await res.json())
+      if (res.ok) {
+        const data = await res.json()
+        setProfile(data)
+        setDraft({ native_lang: data.native_lang, target_lang: data.target_lang, difficulty_pref: data.difficulty_pref })
+      }
       setLoading(false)
     }
     load()
   }, [router])
+
+  const handleSave = async () => {
+    if (!draft) return
+    setSaving(true)
+    const res = await fetch('/api/profile', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(draft),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      setProfile((prev) => prev ? { ...prev, ...data } : data)
+      setEditing(false)
+    }
+    setSaving(false)
+  }
 
   const handleSignOut = async () => {
     const supabase = getSupabase()
@@ -62,6 +99,13 @@ export default function ProfilePage() {
         <h1 className="text-2xl font-bold text-gray-900">Profile</h1>
       </div>
 
+      {checkoutSuccess && (
+        <div className="rounded-2xl bg-green-50 border border-green-200 p-4">
+          <p className="text-sm font-semibold text-green-700">Subscription activated!</p>
+          <p className="text-xs text-green-600 mt-0.5">Welcome to Pro. All limits have been removed.</p>
+        </div>
+      )}
+
       {/* Account card */}
       <div className="rounded-2xl bg-white p-5 shadow-sm">
         <div className="flex items-center gap-4">
@@ -78,29 +122,72 @@ export default function ProfilePage() {
       </div>
 
       {/* Learning settings */}
-      {profile && (
+      {profile && draft && (
         <div className="rounded-2xl bg-white p-5 shadow-sm">
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-400">Learning settings</h2>
-          <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Native language</span>
-              <span className="text-sm font-medium text-gray-900">{LANG_LABELS[profile.native_lang] ?? profile.native_lang}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Learning</span>
-              <span className="text-sm font-medium text-gray-900">{LANG_LABELS[profile.target_lang] ?? profile.target_lang}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Difficulty</span>
-              <span className="text-sm font-medium text-gray-900 capitalize">{profile.difficulty_pref}</span>
-            </div>
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">Learning settings</h2>
+            {!editing ? (
+              <button onClick={() => setEditing(true)} className="text-sm text-blue-500">Edit</button>
+            ) : (
+              <div className="flex gap-3">
+                <button onClick={() => { setEditing(false); setDraft({ native_lang: profile.native_lang, target_lang: profile.target_lang, difficulty_pref: profile.difficulty_pref }) }} className="text-sm text-gray-400">Cancel</button>
+                <button onClick={handleSave} disabled={saving} className="text-sm font-medium text-blue-500 disabled:opacity-50">{saving ? 'Saving...' : 'Save'}</button>
+              </div>
+            )}
           </div>
-          <Link
-            href="/onboarding"
-            className="mt-4 block text-center text-sm text-blue-500 hover:underline"
-          >
-            Change settings
-          </Link>
+
+          {!editing ? (
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">Native language</span>
+                <span className="text-sm font-medium text-gray-900">{LANG_LABELS[profile.native_lang] ?? profile.native_lang}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">Learning</span>
+                <span className="text-sm font-medium text-gray-900">{LANG_LABELS[profile.target_lang] ?? profile.target_lang}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">Difficulty</span>
+                <span className="text-sm font-medium text-gray-900 capitalize">{profile.difficulty_pref}</span>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-5">
+              <div>
+                <p className="mb-2 text-xs font-medium text-gray-500">Native language</p>
+                <div className="flex flex-wrap gap-2">
+                  {LANGUAGES.map((lang) => (
+                    <button key={lang.code} onClick={() => setDraft((d) => d ? { ...d, native_lang: lang.code } : d)}
+                      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${draft.native_lang === lang.code ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                      {lang.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="mb-2 text-xs font-medium text-gray-500">Learning</p>
+                <div className="flex flex-wrap gap-2">
+                  {LANGUAGES.filter((l) => l.code !== draft.native_lang).map((lang) => (
+                    <button key={lang.code} onClick={() => setDraft((d) => d ? { ...d, target_lang: lang.code } : d)}
+                      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${draft.target_lang === lang.code ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                      {lang.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="mb-2 text-xs font-medium text-gray-500">Difficulty</p>
+                <div className="flex flex-wrap gap-2">
+                  {DIFFICULTIES.map((d) => (
+                    <button key={d.value} onClick={() => setDraft((prev) => prev ? { ...prev, difficulty_pref: d.value } : prev)}
+                      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${draft.difficulty_pref === d.value ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                      {d.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -152,5 +239,13 @@ export default function ProfilePage() {
         Sign out
       </button>
     </div>
+  )
+}
+
+export default function ProfilePage() {
+  return (
+    <Suspense>
+      <ProfileContent />
+    </Suspense>
   )
 }

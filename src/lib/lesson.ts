@@ -8,10 +8,10 @@ export async function createLesson(videoId: string, userId?: string) {
     .upsert(
       {
         video_id: videoId,
+        user_id: userId ?? null,
         assigned_date: new Date().toISOString().split('T')[0],
         status: 'pending',
-        ...(userId ? { user_id: userId } : {}),
       },
-      { onConflict: 'video_id' }
+      { onConflict: 'video_id,user_id' }
     )
 }

@@ -36,6 +36,20 @@ export async function GET() {
   return NextResponse.json(data)
 }
 
+// DELETE /api/teacher/classes?classId=... — delete a class
+export async function DELETE(req: NextRequest) {
+  const user = await requireTeacher()
+  if (!user) return NextResponse.json({ error: 'Team plan required' }, { status: 403 })
+
+  const classId = req.nextUrl.searchParams.get('classId')
+  if (!classId) return NextResponse.json({ error: 'classId required' }, { status: 400 })
+
+  const supabase = await createSessionClient()
+  const { error } = await supabase.from('classes').delete().eq('id', classId).eq('teacher_id', user.id)
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json({ success: true })
+}
+
 // POST /api/teacher/classes — create a new class
 export async function POST(req: NextRequest) {
   const user = await requireTeacher()

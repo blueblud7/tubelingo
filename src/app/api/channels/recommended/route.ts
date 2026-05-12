@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase'
+import { createServiceClient, getCurrentUser } from '@/lib/supabase'
 
 // Curated popular language learning channels
 const CURATED: { name: string; youtube_id: string; language: string; description: string }[] = [
@@ -19,10 +19,13 @@ const CURATED: { name: string; youtube_id: string; language: string; description
 
 // GET /api/channels/recommended — return popular channels not yet subscribed
 export async function GET() {
+  const user = await getCurrentUser()
   const db = createServiceClient()
 
-  // Get currently subscribed channel IDs
-  const { data: subscribed } = await db.from('channels').select('youtube_id, language, subscriber_count')
+  // Get current user's subscribed channel IDs (user-specific)
+  let subscribedQuery = db.from('channels').select('youtube_id, language, subscriber_count')
+  if (user) subscribedQuery = subscribedQuery.eq('user_id', user.id)
+  const { data: subscribed } = await subscribedQuery
   const subscribedIds = new Set((subscribed ?? []).map((c) => c.youtube_id))
 
   // Get languages the user is already learning (to prioritize relevant recommendations)

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 
-const PUBLIC_PATHS = ['/auth/sign-in', '/auth/sign-up', '/auth/callback', '/auth/forgot-password']
+const PUBLIC_PATHS = ['/auth/sign-in', '/auth/sign-up', '/auth/callback', '/auth/forgot-password', '/auth/reset-password']
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -39,7 +39,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // Redirect authenticated users away from auth pages
-  if (user && isPublic && !pathname.startsWith('/auth/callback')) {
+  if (user && isPublic && !pathname.startsWith('/auth/callback') && !pathname.startsWith('/auth/reset-password')) {
     const url = request.nextUrl.clone()
     url.pathname = '/'
     return NextResponse.redirect(url)

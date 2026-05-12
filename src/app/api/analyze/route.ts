@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase'
-import { fetchTranscript } from '@/lib/transcript'
+import { createServiceClient, getCurrentUser } from '@/lib/supabase'
+import { fetchTranscript, TranscriptFetchError } from '@/lib/transcript'
 import { analyzeTranscript } from '@/lib/openai'
 import { createLesson } from '@/lib/lesson'
 
 // POST /api/analyze — manually trigger analysis for a video
 export async function POST(req: NextRequest) {
+  const user = await getCurrentUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const { video_id, native_language = 'ko', difficulty = 'mixed' } = await req.json()
   if (!video_id) return NextResponse.json({ error: 'video_id is required' }, { status: 400 })
 
@@ -22,8 +25,15 @@ export async function POST(req: NextRequest) {
   try {
     let transcript = video.transcript
     if (!transcript) {
-      transcript = await fetchTranscript(video.youtube_video_id, video.channel?.language ?? 'en')
-      await db.from('videos').update({ transcript }).eq('id', video_id)
+      try {
+        transcript = await fetchTranscript(video.youtube_video_id, video.channel?.language ?? 'en')
+        await db.from('videos').update({ transcript, transcript_error: null, transcript_error_msg: null }).eq('id', video_id)
+      } catch (err) {
+        const errorType = err instanceof TranscriptFetchError ? err.errorType : 'unknown'
+        const errorMsg = err instanceof Error ? err.message : String(err)
+        await db.from('videos').update({ transcript_error: errorType, transcript_error_msg: errorMsg }).eq('id', video_id)
+        throw err
+      }
     }
 
     const sentences = await analyzeTranscript(
@@ -49,7 +59,7 @@ export async function POST(req: NextRequest) {
     )
 
     await db.from('videos').update({ processed: true }).eq('id', video_id)
-    await createLesson(video_id)
+    await createLesson(video_id, user.id)
 
     return NextResponse.json({ success: true, sentences })
   } catch (err) {

@@ -21,12 +21,23 @@ interface RecommendedChannel {
   subscriber_count: number
 }
 
+const CHANNEL_LANGUAGES = [
+  { code: 'en', label: 'English' },
+  { code: 'ko', label: '한국어' },
+  { code: 'ja', label: '日本語' },
+  { code: 'es', label: 'Español' },
+  { code: 'zh', label: '中文' },
+]
+
 export default function ChannelsPage() {
   const [channels, setChannels] = useState<Channel[]>([])
   const [recommended, setRecommended] = useState<RecommendedChannel[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [subscribingId, setSubscribingId] = useState<string | null>(null)
+  const [selectedLang, setSelectedLang] = useState('en')
+  const [fetching, setFetching] = useState(false)
+  const [fetchStatus, setFetchStatus] = useState<{ message: string; step: string } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const fetchAll = () => {
@@ -54,7 +65,7 @@ export default function ChannelsPage() {
       const res = await fetch('/api/channels', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: channelUrl }),
+        body: JSON.stringify({ url: channelUrl, language: selectedLang }),
       })
       const data = await res.json()
       if (res.status === 403) throw new Error(data.error + '\n\n👉 /subscribe 에서 Pro로 업그레이드하세요.')
@@ -93,6 +104,27 @@ export default function ChannelsPage() {
     }
   }
 
+  const fetchLessons = async () => {
+    setFetching(true)
+    setFetchStatus({ message: 'Starting...', step: 'checking' })
+    const res = await fetch('/api/rss', { method: 'POST' })
+    if (!res.body) { setFetching(false); return }
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      for (const line of decoder.decode(value).split('\n')) {
+        if (!line.startsWith('data: ')) continue
+        try {
+          const data = JSON.parse(line.slice(6))
+          setFetchStatus(data)
+        } catch {}
+      }
+    }
+    setFetching(false)
+  }
+
   const subscribedIds = new Set(channels.map((c) => c.youtube_id))
 
   return (
@@ -120,15 +152,47 @@ export default function ChannelsPage() {
             {loading ? '...' : 'Add'}
           </button>
         </div>
-        {error && <p className="text-sm text-red-500">{error}</p>}
+        {/* Channel language selector */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-400">Channel language:</span>
+          <div className="flex gap-1 flex-wrap">
+            {CHANNEL_LANGUAGES.map((lang) => (
+              <button
+                key={lang.code}
+                onClick={() => setSelectedLang(lang.code)}
+                className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                  selectedLang === lang.code
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                }`}
+              >
+                {lang.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {error && <p className="whitespace-pre-wrap text-sm text-red-500">{error}</p>}
       </div>
 
       {/* Subscribed channel list */}
       {channels.length > 0 && (
         <section>
-          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
-            Subscribed
-          </h2>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-400">Subscribed</h2>
+            <button
+              onClick={fetchLessons}
+              disabled={fetching}
+              className="rounded-lg bg-blue-500 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+            >
+              {fetching ? '...' : 'Fetch lessons'}
+            </button>
+          </div>
+          {fetchStatus && (
+            <div className="mb-3 flex items-center gap-2 rounded-xl bg-blue-50 px-3 py-2 text-xs text-blue-700">
+              {fetching && <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-blue-200 border-t-blue-500" />}
+              <span>{fetchStatus.message}</span>
+            </div>
+          )}
           <div className="flex flex-col gap-3">
             {channels.map((ch) => (
               <div key={ch.id} className="flex items-center gap-3 rounded-2xl bg-white p-4 shadow-sm">

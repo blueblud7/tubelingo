@@ -3,15 +3,16 @@ import { createServiceClient, getCurrentUser } from '@/lib/supabase'
 
 export async function GET() {
   const user = await getCurrentUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const db = createServiceClient()
 
-  let lessonsQuery = db
+  const { data: lessons, error } = await db
     .from('lessons')
     .select('assigned_date, status, score, completed_at')
     .eq('status', 'completed')
+    .eq('user_id', user.id)
     .order('assigned_date', { ascending: false })
-  if (user) lessonsQuery = lessonsQuery.eq('user_id', user.id)
-  const { data: lessons, error } = await lessonsQuery
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
@@ -79,20 +80,41 @@ export async function GET() {
   }
 
   // --- Today's progress ---
-  let todayQuery = db.from('lessons').select('status').eq('assigned_date', todayStr)
-  if (user) todayQuery = todayQuery.eq('user_id', user.id)
-  const { data: todayLessons } = await todayQuery
+  const { data: todayLessons } = await db
+    .from('lessons')
+    .select('status')
+    .eq('assigned_date', todayStr)
+    .eq('user_id', user.id)
 
   const todayTotal = todayLessons?.length ?? 0
   const todayDone = todayLessons?.filter((l) => l.status === 'completed').length ?? 0
 
   // --- SM-2 review due count ---
-  let vocabQuery = db
+  const { count: reviewDue } = await db
     .from('user_vocabulary')
     .select('*', { count: 'exact', head: true })
     .lte('next_review', todayStr)
-  if (user) vocabQuery = vocabQuery.eq('user_id', user.id)
-  const { count: reviewDue } = await vocabQuery
+    .eq('user_id', user.id)
+
+  // --- Transcript success/failure stats (admin view) ---
+  const { data: videoStats } = await db
+    .from('videos')
+    .select('transcript_error')
+
+  const transcriptStats = { success: 0, disabled: 0, no_captions: 0, lang_missing: 0, blocked: 0, unavailable: 0, unknown: 0 }
+  for (const v of videoStats ?? []) {
+    if (!v.transcript_error) {
+      transcriptStats.success++
+    } else {
+      const key = v.transcript_error as keyof typeof transcriptStats
+      if (key in transcriptStats) transcriptStats[key]++
+      else transcriptStats.unknown++
+    }
+  }
+  const totalVideos = (videoStats ?? []).length
+  const transcriptSuccessRate = totalVideos > 0
+    ? Math.round((transcriptStats.success / totalVideos) * 100)
+    : null
 
   return NextResponse.json({
     streak,
@@ -102,5 +124,6 @@ export async function GET() {
     todayDone,
     calendar,
     reviewDue: reviewDue ?? 0,
+    transcriptStats: { ...transcriptStats, total: totalVideos, successRate: transcriptSuccessRate },
   })
 }

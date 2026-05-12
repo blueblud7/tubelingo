@@ -5,13 +5,14 @@ import { checkVocabularyLimit, FREE_LIMITS } from '@/lib/plans'
 // GET /api/vocabulary — list saved words for current user
 export async function GET() {
   const user = await getCurrentUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const db = createServiceClient()
-  let query = db
+  const { data, error } = await db
     .from('user_vocabulary')
     .select('*')
+    .eq('user_id', user.id)
     .order('next_review', { ascending: true })
-  if (user) query = query.eq('user_id', user.id)
-  const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(data)
 }
@@ -23,9 +24,10 @@ export async function POST(req: NextRequest) {
   if (!word || !definition) return NextResponse.json({ error: 'word and definition required' }, { status: 400 })
 
   const user = await getCurrentUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   // Free plan: max 100 words
-  if (user) {
+  {
     const limit = await checkVocabularyLimit(user.id)
     if (!limit.allowed) {
       return NextResponse.json(
@@ -46,9 +48,9 @@ export async function POST(req: NextRequest) {
         pronunciation,
         source_sentence,
         source_video_id,
-        ...(user ? { user_id: user.id } : {}),
+        user_id: user.id,
       },
-      { onConflict: 'word' }
+      { onConflict: 'word,user_id' }
     )
     .select()
     .single()

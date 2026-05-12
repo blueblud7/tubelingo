@@ -9,17 +9,21 @@ import { checkChannelLimit, FREE_LIMITS } from '@/lib/plans'
 // GET /api/channels — list channels for current user
 export async function GET() {
   const user = await getCurrentUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const db = createServiceClient()
-  let query = db.from('channels').select('*').order('created_at', { ascending: false })
-  if (user) query = query.eq('user_id', user.id)
-  const { data, error } = await query
+  const { data, error } = await db
+    .from('channels')
+    .select('*')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(data)
 }
 
 // POST /api/channels — subscribe to a new channel
 export async function POST(req: NextRequest) {
-  const { url } = await req.json()
+  const { url, language } = await req.json()
   if (!url) return NextResponse.json({ error: 'url is required' }, { status: 400 })
 
   try {
@@ -50,7 +54,7 @@ export async function POST(req: NextRequest) {
           youtube_id: channelId,
           rss_url: rssUrl,
           name: feed.title || 'Unknown Channel',
-          language: 'en',
+          language: language ?? 'en',
           subscriber_count: (existing?.subscriber_count ?? 0) + 1,
           ...(user ? { user_id: user.id } : {}),
         },
@@ -62,7 +66,14 @@ export async function POST(req: NextRequest) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
     // Fire-and-forget: process the latest video immediately
-    processLatestVideo(data.id, channelId, data.language ?? 'en', feed, user?.id).catch(() => {})
+    let nativeLang = 'ko'
+    let difficultyPref: 'beginner' | 'intermediate' | 'advanced' | 'mixed' = 'mixed'
+    if (user) {
+      const { data: profile } = await db.from('profiles').select('native_lang, difficulty_pref').eq('id', user.id).single()
+      nativeLang = profile?.native_lang ?? 'ko'
+      difficultyPref = (profile?.difficulty_pref ?? 'mixed') as typeof difficultyPref
+    }
+    processLatestVideo(data.id, channelId, data.language ?? 'en', feed, user?.id, nativeLang, difficultyPref).catch(() => {})
 
     return NextResponse.json(data)
   } catch (err) {
@@ -75,7 +86,9 @@ async function processLatestVideo(
   channelId: string,
   language: string,
   feed: Awaited<ReturnType<typeof fetchChannelRSS>>,
-  userId?: string
+  userId?: string,
+  nativeLang = 'ko',
+  difficultyPref: 'beginner' | 'intermediate' | 'advanced' | 'mixed' = 'mixed'
 ) {
   const db = createServiceClient()
   const item = feed.items?.[0]
@@ -112,7 +125,7 @@ async function processLatestVideo(
   const transcript = await fetchTranscript(videoId, language)
   await db.from('videos').update({ transcript }).eq('id', video.id)
 
-  const sentences = await analyzeTranscript(transcript, language, 'en', 'mixed')
+  const sentences = await analyzeTranscript(transcript, language, nativeLang, difficultyPref)
   await db.from('sentences').insert(
     sentences.map((s) => ({
       video_id: video.id,
@@ -131,11 +144,14 @@ async function processLatestVideo(
 
 // DELETE /api/channels?id=...
 export async function DELETE(req: NextRequest) {
+  const user = await getCurrentUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const id = req.nextUrl.searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 })
 
   const db = createServiceClient()
-  const { error } = await db.from('channels').delete().eq('id', id)
+  const { error } = await db.from('channels').delete().eq('id', id).eq('user_id', user.id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ success: true })
 }

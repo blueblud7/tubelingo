@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase'
+import { createServiceClient, getCurrentUser } from '@/lib/supabase'
 
 // SM-2 spaced repetition algorithm
 // quality: 0-5 (0=blackout, 3=hard, 5=perfect)
@@ -33,17 +33,21 @@ function sm2(quality: number, easiness: number, interval: number, reps: number) 
 
 // PATCH /api/vocabulary/[id] — update SM-2 after review
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const user = await getCurrentUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const { id } = await params
   const { quality } = await req.json() // quality: 0-5
 
   const db = createServiceClient()
   const { data: vocab, error: fetchErr } = await db
     .from('user_vocabulary')
-    .select('easiness_factor, interval_days, repetitions')
+    .select('easiness_factor, interval_days, repetitions, user_id')
     .eq('id', id)
     .single()
 
   if (fetchErr || !vocab) return NextResponse.json({ error: 'not found' }, { status: 404 })
+  if (vocab.user_id && vocab.user_id !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const updates = sm2(quality, vocab.easiness_factor, vocab.interval_days, vocab.repetitions)
   const { data, error } = await db.from('user_vocabulary').update(updates).eq('id', id).select().single()
@@ -53,9 +57,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
 // DELETE /api/vocabulary/[id]
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const user = await getCurrentUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const { id } = await params
   const db = createServiceClient()
-  const { error } = await db.from('user_vocabulary').delete().eq('id', id)
+  const { error } = await db.from('user_vocabulary').delete().eq('id', id).eq('user_id', user.id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ success: true })
 }

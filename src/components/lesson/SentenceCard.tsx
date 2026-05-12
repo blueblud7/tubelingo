@@ -8,11 +8,12 @@ interface Props {
   index: number
   total: number
   youtubeVideoId?: string
+  targetLanguage?: string
   onGotIt: () => void
   onReview: () => void
 }
 
-export default function SentenceCard({ sentence, index, total, youtubeVideoId, onGotIt, onReview }: Props) {
+export default function SentenceCard({ sentence, index, total, youtubeVideoId, targetLanguage = 'en', onGotIt, onReview }: Props) {
   const [showTranslation, setShowTranslation] = useState(false)
   const [expandedWord, setExpandedWord] = useState<string | null>(null)
   const [savedWords, setSavedWords] = useState<Set<string>>(new Set())
@@ -83,7 +84,11 @@ export default function SentenceCard({ sentence, index, total, youtubeVideoId, o
     }
 
     const recognition = new SR()
-    recognition.lang = 'en-US'
+    recognition.lang = targetLanguage.startsWith('en') ? 'en-US'
+      : targetLanguage.startsWith('ja') ? 'ja-JP'
+      : targetLanguage.startsWith('es') ? 'es-ES'
+      : targetLanguage.startsWith('zh') ? 'zh-CN'
+      : targetLanguage
     recognition.interimResults = false
     recognition.maxAlternatives = 1
     recognitionRef.current = recognition
@@ -93,7 +98,7 @@ export default function SentenceCard({ sentence, index, total, youtubeVideoId, o
     recognition.onresult = (event: any) => {
       const spoken = event.results[0][0].transcript.trim()
       setSttTranscript(spoken)
-      setSttScore(calcSimilarity(spoken, sentence.text))
+      setSttScore(calcSimilarity(spoken, sentence.text, targetLanguage))
       setSttState('result')
     }
     recognition.onerror = () => setSttState('idle')
@@ -231,6 +236,19 @@ export default function SentenceCard({ sentence, index, total, youtubeVideoId, o
         </div>
       )}
 
+      {/* Grammar Points */}
+      {sentence.grammar_points?.length > 0 && (
+        <div className="rounded-xl border border-green-100 bg-green-50 p-4 text-sm">
+          <p className="mb-2 font-semibold text-green-800">Grammar Points</p>
+          {sentence.grammar_points.map((gp, i) => (
+            <div key={i} className={i > 0 ? 'mt-3 border-t border-green-100 pt-3' : ''}>
+              <p className="font-medium text-green-900">{gp.pattern}</p>
+              <p className="mt-0.5 text-gray-600">{gp.explanation}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Vocab limit banner */}
       {vocabLimitHit && (
         <div className="rounded-xl bg-orange-50 border border-orange-200 px-4 py-3 text-sm">
@@ -298,13 +316,25 @@ export default function SentenceCard({ sentence, index, total, youtubeVideoId, o
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function normalize(s: string) {
-  return s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim()
+  return s.toLowerCase().replace(/[^a-z0-9　-鿿가-힯\s]/g, '').trim()
 }
 
-function calcSimilarity(spoken: string, target: string): number {
-  const a = normalize(spoken).split(/\s+/)
-  const b = normalize(target).split(/\s+/)
-  const setB = new Set(b)
-  const matches = a.filter((w) => setB.has(w)).length
-  return Math.round((matches / Math.max(b.length, 1)) * 100)
+function calcSimilarity(spoken: string, target: string, language = 'en'): number {
+  const a = normalize(spoken)
+  const b = normalize(target)
+
+  // Japanese / Chinese: character-level matching (no spaces between words)
+  if (language.startsWith('ja') || language.startsWith('zh')) {
+    const aSet = new Set(a.split('').filter((c) => c.trim()))
+    const bChars = b.split('').filter((c) => c.trim())
+    const matches = bChars.filter((c) => aSet.has(c)).length
+    return Math.round((matches / Math.max(bChars.length, 1)) * 100)
+  }
+
+  // Korean / Latin / others: word-level matching
+  const aWords = a.split(/\s+/).filter(Boolean)
+  const bWords = b.split(/\s+/).filter(Boolean)
+  const setB = new Set(bWords)
+  const matches = aWords.filter((w) => setB.has(w)).length
+  return Math.round((matches / Math.max(bWords.length, 1)) * 100)
 }
