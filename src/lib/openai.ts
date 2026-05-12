@@ -5,7 +5,7 @@ function getClient() {
   return new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 }
 
-const MODEL = 'gpt-4o-mini' // update to gpt-5-nano when available
+const MODEL = 'gpt-5-nano'
 
 export async function analyzeTranscript(
   transcript: string,
