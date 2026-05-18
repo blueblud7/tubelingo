@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 
-const PUBLIC_PATHS = ['/auth/sign-in', '/auth/sign-up', '/auth/callback', '/auth/forgot-password', '/auth/reset-password']
+const PUBLIC_PATHS = ['/', '/auth/sign-in', '/auth/sign-up', '/auth/callback', '/auth/forgot-password', '/auth/reset-password']
 
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
@@ -38,8 +38,8 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // Redirect authenticated users away from auth pages
-  if (user && isPublic && !pathname.startsWith('/auth/callback') && !pathname.startsWith('/auth/reset-password')) {
+  // Redirect authenticated users away from auth pages (not from / itself — page handles both states)
+  if (user && isPublic && pathname !== '/' && !pathname.startsWith('/auth/callback') && !pathname.startsWith('/auth/reset-password')) {
     const url = request.nextUrl.clone()
     url.pathname = '/'
     return NextResponse.redirect(url)

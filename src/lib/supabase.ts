@@ -1,13 +1,17 @@
 import { createClient } from '@supabase/supabase-js'
 import { createServerClient } from '@supabase/ssr'
 
-// ── Browser client (client components) ───────────────────────────────────────
+// ── Browser client (client components) — singleton to avoid multiple instances ─
+let _browserClient: ReturnType<typeof createClient> | null = null
 export function getSupabase() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { auth: { flowType: 'pkce' } }
-  )
+  if (!_browserClient) {
+    _browserClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      { auth: { flowType: 'pkce' } }
+    )
+  }
+  return _browserClient
 }
 
 // ── Server client with session (server components & API routes) ───────────────
